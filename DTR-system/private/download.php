@@ -13,10 +13,12 @@ header('Content-Disposition: attachment; filename="DTR_Sheet_' . date('Y-m-d') .
 
 $output = fopen('php://output', 'w');
 // Write the column headers
-fputcsv($output, ['Record ID', 'ID Number', 'Name', 'Record Type', 'Timestamp']);
+fputcsv($output, ['Record ID', 'ID Number', 'Name', 'Record Type', 'Timestamp', 'Photo Path']);
 
 $dl_user = $_GET['dl_user'] ?? 'all';
 $dl_time = $_GET['dl_time'] ?? 'all';
+$dl_search = $_GET['dl_search'] ?? '';
+$dl_date = $_GET['dl_date'] ?? '';
 
 $where_clauses = [];
 $params = [];
@@ -28,7 +30,20 @@ if ($dl_user !== 'all') {
     $types .= 's';
 }
 
-if ($dl_time === 'weekly') {
+if (!empty($dl_search)) {
+    $where_clauses[] = "(u.name LIKE ? OR r.idnumber LIKE ?)";
+    $search_term = "%" . $dl_search . "%";
+    $params[] = $search_term;
+    $params[] = $search_term;
+    $types .= 'ss';
+}
+
+if (!empty($dl_date)) {
+    // If a specific date is chosen, it overrides the timeframe dropdown
+    $where_clauses[] = "DATE(r.timestamp) = ?";
+    $params[] = $dl_date;
+    $types .= 's';
+} elseif ($dl_time === 'weekly') {
     $where_clauses[] = "YEARWEEK(r.timestamp, 1) = YEARWEEK(CURDATE(), 1)";
 } elseif ($dl_time === 'monthly') {
     $where_clauses[] = "MONTH(r.timestamp) = MONTH(CURDATE()) AND YEAR(r.timestamp) = YEAR(CURDATE())";
@@ -41,7 +56,7 @@ if (count($where_clauses) > 0) {
     $where_sql = "WHERE " . implode(" AND ", $where_clauses);
 }
 
-$query = "SELECT r.id, r.idnumber, u.name, r.record_type, r.timestamp FROM records r LEFT JOIN user u ON r.idnumber = u.idnumber $where_sql ORDER BY r.timestamp DESC";
+$query = "SELECT r.id, r.idnumber, u.name, r.record_type, r.timestamp, r.photo_path FROM records r LEFT JOIN user u ON r.idnumber = u.idnumber $where_sql ORDER BY r.timestamp DESC";
 
 if ($types) {
     $stmt = $conn->prepare($query);
@@ -54,6 +69,11 @@ if ($types) {
 
 if ($result) {
     while ($row = $result->fetch_assoc()) {
+        // Format the data for a cleaner CSV sheet
+        $row['record_type'] = ucfirst($row['record_type']);
+        $row['timestamp'] = date('M d, Y h:i A', strtotime($row['timestamp']));
+        $row['photo_path'] = !empty($row['photo_path']) ? $row['photo_path'] : 'No Photo';
+        
         fputcsv($output, $row);
     }
 }

@@ -54,7 +54,7 @@ while($row = $users_result->fetch_assoc()) {
 $selected_user_records = [];
 $selected_user_name = '';
 if (isset($_GET['idnumber']) && !empty($_GET['idnumber'])) {
-    $stmt = $conn->prepare("SELECT u.name, r.record_type, r.timestamp FROM records r JOIN user u ON r.idnumber = u.idnumber WHERE r.idnumber = ? ORDER BY r.timestamp DESC");
+    $stmt = $conn->prepare("SELECT u.name, r.record_type, r.timestamp, r.photo_path FROM records r JOIN user u ON r.idnumber = u.idnumber WHERE r.idnumber = ? ORDER BY r.timestamp DESC");
     $stmt->bind_param("s", $_GET['idnumber']);
     $stmt->execute();
     $user_records_result = $stmt->get_result();
@@ -69,6 +69,8 @@ if (isset($_GET['idnumber']) && !empty($_GET['idnumber'])) {
 // Fetch preview data for Download Reports
 $dl_user = $_GET['dl_user'] ?? 'all';
 $dl_time = $_GET['dl_time'] ?? 'all';
+$dl_search = $_GET['dl_search'] ?? '';
+$dl_date = $_GET['dl_date'] ?? '';
 
 $where_clauses_dl = [];
 $params_dl = [];
@@ -80,7 +82,20 @@ if ($dl_user !== 'all') {
     $types_dl .= 's';
 }
 
-if ($dl_time === 'weekly') {
+if (!empty($dl_search)) {
+    $where_clauses_dl[] = "(u.name LIKE ? OR r.idnumber LIKE ?)";
+    $search_term = "%" . $dl_search . "%";
+    $params_dl[] = $search_term;
+    $params_dl[] = $search_term;
+    $types_dl .= 'ss';
+}
+
+if (!empty($dl_date)) {
+    // If a specific date is chosen, it overrides the timeframe dropdown
+    $where_clauses_dl[] = "DATE(r.timestamp) = ?";
+    $params_dl[] = $dl_date;
+    $types_dl .= 's';
+} elseif ($dl_time === 'weekly') {
     $where_clauses_dl[] = "YEARWEEK(r.timestamp, 1) = YEARWEEK(CURDATE(), 1)";
 } elseif ($dl_time === 'monthly') {
     $where_clauses_dl[] = "MONTH(r.timestamp) = MONTH(CURDATE()) AND YEAR(r.timestamp) = YEAR(CURDATE())";
@@ -93,7 +108,7 @@ if (count($where_clauses_dl) > 0) {
     $where_sql_dl = "WHERE " . implode(" AND ", $where_clauses_dl);
 }
 
-$preview_query = "SELECT r.id, r.idnumber, u.name, r.record_type, r.timestamp FROM records r LEFT JOIN user u ON r.idnumber = u.idnumber $where_sql_dl ORDER BY r.timestamp DESC LIMIT 100";
+$preview_query = "SELECT r.id, r.idnumber, u.name, r.record_type, r.timestamp, r.photo_path FROM records r LEFT JOIN user u ON r.idnumber = u.idnumber $where_sql_dl ORDER BY r.timestamp DESC LIMIT 100";
 
 if ($types_dl) {
     $stmt_dl = $conn->prepare($preview_query);
@@ -105,6 +120,10 @@ if ($types_dl) {
 }
 
 $preview_records = $preview_result ? $preview_result->fetch_all(MYSQLI_ASSOC) : [];
+
+$recent_photos_query = "SELECT r.idnumber, u.name, r.photo_path, r.timestamp FROM records r LEFT JOIN user u ON r.idnumber = u.idnumber WHERE r.photo_path IS NOT NULL AND r.photo_path != '' ORDER BY r.timestamp DESC LIMIT 20";
+$recent_photos_result = $conn->query($recent_photos_query);
+$recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI_ASSOC) : [];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -140,6 +159,7 @@ $preview_records = $preview_result ? $preview_result->fetch_all(MYSQLI_ASSOC) : 
 
         <div class="action-links">
             <a href="../public/index.php" class="btn btn-secondary">Back to Public Portal</a>
+            <a href="logout.php" class="btn" style="background-color: #e53e3e;">Logout Admin</a>
         </div>
 
         <?php
@@ -179,6 +199,12 @@ $preview_records = $preview_result ? $preview_result->fetch_all(MYSQLI_ASSOC) : 
                     <?php if (isset($_GET['dl_time'])): ?>
                         <input type="hidden" name="dl_time" value="<?= htmlspecialchars($_GET['dl_time']) ?>">
                     <?php endif; ?>
+                    <?php if (isset($_GET['dl_search'])): ?>
+                        <input type="hidden" name="dl_search" value="<?= htmlspecialchars($_GET['dl_search']) ?>">
+                    <?php endif; ?>
+                    <?php if (isset($_GET['dl_date'])): ?>
+                        <input type="hidden" name="dl_date" value="<?= htmlspecialchars($_GET['dl_date']) ?>">
+                    <?php endif; ?>
                     <label for="user_select">Select Employee:</label>
                     <select name="idnumber" id="user_select" onchange="this.form.submit()">
                         <option value="">-- Select an Employee --</option>
@@ -192,12 +218,13 @@ $preview_records = $preview_result ? $preview_result->fetch_all(MYSQLI_ASSOC) : 
 
                 <?php if (!empty($selected_user_records)): ?>
                     <h4 style="margin-top: 20px; margin-bottom: 10px; color: var(--text-main);">Records for <?= htmlspecialchars($selected_user_name) ?></h4>
-                    <div style="max-height: 250px; overflow-y: auto;">
+                    <div class="table-responsive" style="max-height: 250px; overflow-y: auto;">
                         <table class="user-records-table">
                             <thead>
                                 <tr>
                                     <th>Record Type</th>
                                     <th>Timestamp</th>
+                                    <th>Photo</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -209,6 +236,13 @@ $preview_records = $preview_result ? $preview_result->fetch_all(MYSQLI_ASSOC) : 
                                             </span>
                                         </td>
                                         <td style="font-size: 0.9rem; color: var(--text-muted);"><?= date('M d, Y h:i A', strtotime($record['timestamp'])) ?></td>
+                                        <td>
+                                            <?php if (!empty($record['photo_path'])): ?>
+                                                <a href="../public/<?= htmlspecialchars($record['photo_path']) ?>" target="_blank" style="color: var(--primary); text-decoration: underline; font-size: 0.85rem;">View</a>
+                                            <?php else: ?>
+                                                <span style="color: var(--text-muted); font-size: 0.85rem;">-</span>
+                                            <?php endif; ?>
+                                        </td>
                                     </tr>
                                 <?php endforeach; ?>
                             </tbody>
@@ -223,27 +257,44 @@ $preview_records = $preview_result ? $preview_result->fetch_all(MYSQLI_ASSOC) : 
             <div class="form-section full-width">
                 <h3>Download Reports & Preview</h3>
                 <form action="dashboard.php" method="GET" class="report-form" style="display: flex; flex-direction: row; gap: 15px; flex-wrap: wrap; align-items: flex-end;">
+                    <!-- Hidden inputs to preserve state -->
                     <input type="hidden" name="month" value="<?= htmlspecialchars($month) ?>">
                     <input type="hidden" name="year" value="<?= htmlspecialchars($year) ?>">
                     <?php if (isset($_GET['idnumber'])): ?>
                         <input type="hidden" name="idnumber" value="<?= htmlspecialchars($_GET['idnumber']) ?>">
                     <?php endif; ?>
 
-                    <div style="flex: 1; min-width: 200px;">
-                        <label for="dl_user" style="display:block; margin-bottom: 5px;">Select Employee:</label>
+                    <!-- Search Bar -->
+                    <div style="flex: 2; min-width: 250px;">
+                        <label for="dl_search" style="display:block; margin-bottom: 5px;">Search by Name/ID:</label>
+                        <div style="display:flex; gap: 5px;">
+                            <input type="search" name="dl_search" id="dl_search" placeholder="Enter name or ID..." value="<?= htmlspecialchars($dl_search) ?>" style="margin-bottom: 0; width: 100%;" onchange="this.form.submit()">
+                        </div>
+                    </div>
+
+                    <!-- Employee Dropdown -->
+                    <div style="flex: 1; min-width: 180px;">
+                        <label for="dl_user" style="display:block; margin-bottom: 5px;">Employee:</label>
                         <select name="dl_user" id="dl_user" onchange="this.form.submit()" style="margin-bottom: 0;">
                             <option value="all">All Employees</option>
                             <?php foreach($all_users as $user): ?>
                                 <option value="<?= htmlspecialchars($user['idnumber']) ?>" <?= ($dl_user == $user['idnumber']) ? 'selected' : '' ?>>
-                                    <?= htmlspecialchars($user['name']) ?> (<?= htmlspecialchars($user['idnumber']) ?>)
+                                    <?= htmlspecialchars($user['name']) ?>
                                 </option>
                             <?php endforeach; ?>
                         </select>
                     </div>
                     
-                    <div style="flex: 1; min-width: 200px;">
-                        <label for="dl_time" style="display:block; margin-bottom: 5px;">Timeframe:</label>
-                        <select name="dl_time" id="dl_time" onchange="this.form.submit()" style="margin-bottom: 0;">
+                    <!-- Date Filter -->
+                    <div style="flex: 1; min-width: 150px;">
+                        <label for="dl_date" style="display:block; margin-bottom: 5px;">Specific Date:</label>
+                        <input type="date" name="dl_date" id="dl_date" value="<?= htmlspecialchars($dl_date) ?>" onchange="this.form.submit()" style="margin-bottom: 0; padding: 6px 10px;">
+                    </div>
+
+                    <!-- Timeframe Dropdown -->
+                    <div style="flex: 1; min-width: 150px;">
+                        <label for="dl_time" style="display:block; margin-bottom: 5px;">Or Timeframe:</label>
+                        <select name="dl_time" id="dl_time" onchange="this.form.submit()" style="margin-bottom: 0;" <?= !empty($dl_date) ? 'disabled title="Clear Specific Date to use timeframe"' : '' ?>>
                             <option value="all" <?= ($dl_time == 'all') ? 'selected' : '' ?>>All Time</option>
                             <option value="weekly" <?= ($dl_time == 'weekly') ? 'selected' : '' ?>>This Week</option>
                             <option value="monthly" <?= ($dl_time == 'monthly') ? 'selected' : '' ?>>This Month</option>
@@ -251,25 +302,67 @@ $preview_records = $preview_result ? $preview_result->fetch_all(MYSQLI_ASSOC) : 
                         </select>
                     </div>
                     
-                    <div style="flex: 1; min-width: 200px;">
-                        <a href="download.php?dl_user=<?= urlencode($dl_user) ?>&dl_time=<?= urlencode($dl_time) ?>" class="btn" style="width: 100%; display: block; text-align: center; margin-bottom: 0;">Download DTR (CSV)</a>
+                    <!-- Actions -->
+                    <div style="flex: 1; min-width: 250px; display: flex; gap: 10px;">
+                        <a href="download.php?dl_user=<?= urlencode($dl_user) ?>&dl_time=<?= urlencode($dl_time) ?>&dl_search=<?= urlencode($dl_search) ?>&dl_date=<?= urlencode($dl_date) ?>" class="btn" style="flex: 1; text-align: center; margin-bottom: 0; display: flex; align-items: center; justify-content: center;">Download CSV</a>
+                        <a href="dashboard.php" class="btn btn-secondary" style="flex: 1; text-align: center; margin-bottom: 0; display: flex; align-items: center; justify-content: center;" title="Clear all filters">Clear</a>
                     </div>
                 </form>
 
-                <div style="max-height: 250px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: var(--radius); margin-top: 20px;">
+                <div class="table-responsive" style="max-height: 250px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: var(--radius); margin-top: 20px;">
                     <table class="user-records-table" style="margin-top: 0; border: none;">
                         <thead style="position: sticky; top: 0; z-index: 1; background: #f8fafc; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
-                            <tr><th>ID Number</th><th>Name</th><th>Record Type</th><th>Timestamp</th></tr>
+                            <tr><th>ID Number</th><th>Name</th><th>Record Type</th><th>Timestamp</th><th>Photo</th></tr>
                         </thead>
                         <tbody>
                             <?php if (empty($preview_records)): ?>
-                                <tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 20px;">No records found for the selected filters.</td></tr>
+                                <tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 20px;">No records found for the selected filters.</td></tr>
                             <?php else: foreach($preview_records as $rec): ?>
                                 <tr>
                                     <td><?= htmlspecialchars($rec['idnumber']) ?></td>
                                     <td><?= htmlspecialchars($rec['name'] ?? 'Unknown') ?></td>
                                     <td><span class="badge <?= $rec['record_type'] === 'timein' ? 'badge-timein' : 'badge-timeout' ?>"><?= htmlspecialchars(ucfirst($rec['record_type'])) ?></span></td>
                                     <td style="font-size: 0.9rem; color: var(--text-muted);"><?= date('M d, Y h:i A', strtotime($rec['timestamp'])) ?></td>
+                                    <td>
+                                        <?php if (!empty($rec['photo_path'])): ?>
+                                            <a href="../public/<?= htmlspecialchars($rec['photo_path']) ?>" target="_blank" style="color: var(--primary); text-decoration: underline; font-size: 0.85rem;">View</a>
+                                        <?php else: ?>
+                                            <span style="color: var(--text-muted); font-size: 0.85rem;">-</span>
+                                        <?php endif; ?>
+                                    </td>
+                                </tr>
+                            <?php endforeach; endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Recent Photos Section -->
+            <div class="form-section full-width">
+                <h3>Recent Employee Photos</h3>
+                <div class="table-responsive" style="max-height: 400px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: var(--radius); margin-top: 10px;">
+                    <table class="user-records-table" style="margin-top: 0; border: none;">
+                        <thead style="position: sticky; top: 0; z-index: 1; background: #f8fafc; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+                            <tr>
+                                <th>Photo</th>
+                                <th>ID Number</th>
+                                <th>Name</th>
+                                <th>Timestamp</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if (empty($recent_photos)): ?>
+                                <tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 20px;">No recent photos available.</td></tr>
+                            <?php else: foreach($recent_photos as $photo): ?>
+                                <tr>
+                                    <td>
+                                        <a href="../public/<?= htmlspecialchars($photo['photo_path']) ?>" target="_blank" title="View Full Image">
+                                            <img src="../public/<?= htmlspecialchars($photo['photo_path']) ?>" alt="Selfie" style="width: 45px; height: 45px; object-fit: cover; border-radius: 50%; border: 2px solid var(--border-color); display: block; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">
+                                        </a>
+                                    </td>
+                                    <td style="vertical-align: middle; font-weight: 500;"><?= htmlspecialchars($photo['idnumber']) ?></td>
+                                    <td style="vertical-align: middle;"><?= htmlspecialchars($photo['name'] ?? 'Unknown') ?></td>
+                                    <td style="font-size: 0.9rem; color: var(--text-muted); vertical-align: middle;"><?= date('M d, Y h:i A', strtotime($photo['timestamp'])) ?></td>
                                 </tr>
                             <?php endforeach; endif; ?>
                         </tbody>
@@ -279,8 +372,8 @@ $preview_records = $preview_result ? $preview_result->fetch_all(MYSQLI_ASSOC) : 
         </div>
 
         <div class="chart-container">
-            <?php $idParam = isset($_GET['idnumber']) ? '&idnumber=' . urlencode($_GET['idnumber']) : ''; ?>
-            <?php $dlParam = (isset($_GET['dl_user']) ? '&dl_user=' . urlencode($_GET['dl_user']) : '') . (isset($_GET['dl_time']) ? '&dl_time=' . urlencode($_GET['dl_time']) : ''); ?>
+            <?php $idParam = isset($_GET['idnumber']) && !empty($_GET['idnumber']) ? '&idnumber=' . urlencode($_GET['idnumber']) : ''; ?>
+            <?php $dlParam = (isset($_GET['dl_user']) ? '&dl_user=' . urlencode($_GET['dl_user']) : '') . (isset($_GET['dl_time']) ? '&dl_time=' . urlencode($_GET['dl_time']) : '') . (isset($_GET['dl_search']) && !empty($_GET['dl_search']) ? '&dl_search=' . urlencode($_GET['dl_search']) : '') . (isset($_GET['dl_date']) && !empty($_GET['dl_date']) ? '&dl_date=' . urlencode($_GET['dl_date']) : ''); ?>
             <div class="calendar-header-nav">
                 <a href="?month=<?= $prevMonth ?>&year=<?= $prevYear ?><?= $idParam ?><?= $dlParam ?>">&laquo; Previous</a>
                 <form action="dashboard.php" method="GET" style="display: flex; align-items: center; gap: 10px; margin: 0;">
@@ -292,6 +385,12 @@ $preview_records = $preview_result ? $preview_result->fetch_all(MYSQLI_ASSOC) : 
                     <?php endif; ?>
                     <?php if (isset($_GET['dl_time'])): ?>
                         <input type="hidden" name="dl_time" value="<?= htmlspecialchars($_GET['dl_time']) ?>">
+                    <?php endif; ?>
+                    <?php if (isset($_GET['dl_search'])): ?>
+                        <input type="hidden" name="dl_search" value="<?= htmlspecialchars($_GET['dl_search']) ?>">
+                    <?php endif; ?>
+                    <?php if (isset($_GET['dl_date'])): ?>
+                        <input type="hidden" name="dl_date" value="<?= htmlspecialchars($_GET['dl_date']) ?>">
                     <?php endif; ?>
                     <h2 style="margin: 0;">System Activity</h2>
                     <input type="month" name="month_year" value="<?= sprintf('%04d-%02d', $year, $month) ?>" onchange="this.form.submit()" style="margin: 0; padding: 6px 10px; border: 1px solid var(--border-color); border-radius: var(--radius); font-family: inherit; font-size: 1rem; color: var(--text-main); background: #f8fafc; cursor: pointer;">
