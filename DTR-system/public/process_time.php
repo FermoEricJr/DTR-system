@@ -3,9 +3,10 @@ include '../include/dbcon.php';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $idnumber = $_POST['idnumber'] ?? '';
-    $action = $_POST['action'] ?? ''; // 'timein' or 'timeout'
+    $action = $_POST['action'] ?? ''; 
+    $photo_data = $_POST['photo'] ?? ''; 
 
-    // Check if the user exists in the database
+    // 1. Check if the user exists
     $stmt = $conn->prepare("SELECT id, name FROM user WHERE idnumber = ?");
     $stmt->bind_param("s", $idnumber);
     $stmt->execute();
@@ -14,7 +15,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($result->num_rows > 0) {
         $user = $result->fetch_assoc();
         
-        // Get the user's last recorded action
+        // 2. Alternating Time In / Time Out logic
         $check_stmt = $conn->prepare("SELECT record_type FROM records WHERE idnumber = ? ORDER BY timestamp DESC LIMIT 1");
         $check_stmt->bind_param("s", $idnumber);
         $check_stmt->execute();
@@ -26,53 +27,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $last_action = $last_record['record_type'];
         }
         
-        // Enforce alternating Time In / Time Out
         if ($action === 'timeout' && $last_action !== 'timein') {
-            header("Location: index.php?error=You must Time In before you can Time Out.");
+            header("Location: ../public/index.php?error=You must Time In before you can Time Out.");
             exit;
         }
         if ($action === 'timein' && $last_action === 'timein') {
-            header("Location: index.php?error=You are already Timed In. Please Time Out first.");
+            header("Location: ../public/index.php?error=You are already Timed In.");
             exit;
         }
 
-        // Ensure photo_path column exists
-        $check_col = $conn->query("SHOW COLUMNS FROM records LIKE 'photo_path'");
-        if ($check_col->num_rows == 0) {
-            $conn->query("ALTER TABLE records ADD COLUMN photo_path VARCHAR(255) NULL");
-        }
-
-        // Process photo if provided
+        // 3. IMAGE HANDLING (assets/css/uploads/)
         $photo_path = null;
-        if (!empty($_POST['photo'])) {
-            $base64_string = $_POST['photo'];
-            $image_parts = explode(";base64,", $base64_string);
+        if ($action === 'timein' && !empty($photo_data)) {
+            
+            // Navigate to assets/css/uploads/
+            $base_dir = dirname(__DIR__); 
+            $upload_dir = $base_dir . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . 'css' . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR;
+            
+            if (!is_dir($upload_dir)) {
+                mkdir($upload_dir, 0777, true);
+            }
+
+            $image_parts = explode(";base64,", $photo_data);
             if (count($image_parts) == 2) {
                 $image_base64 = base64_decode($image_parts[1]);
-                $upload_dir = __DIR__ . '/uploads/';
-                if (!is_dir($upload_dir)) {
-                    mkdir($upload_dir, 0777, true);
-                }
+                
+                // REMOVED "selfie_" prefix - just using ID and timestamp string
                 $filename = $idnumber . '_' . time() . '.jpg';
                 $filepath = $upload_dir . $filename;
+
                 if (file_put_contents($filepath, $image_base64)) {
-                    // Save relative path for web access
-                    $photo_path = 'uploads/' . $filename;
+                    // Path to save in database for retrieval
+                    $photo_path = 'assets/css/uploads/' . $filename; 
+                } else {
+                    header("Location: ../public/index.php?error=Failed to write image to CSS folder.");
+                    exit;
                 }
             }
         }
 
-        // User exists, record their time
+        // 4. Record to Database
         $insert_stmt = $conn->prepare("INSERT INTO records (idnumber, record_type, photo_path) VALUES (?, ?, ?)");
         $insert_stmt->bind_param("sss", $idnumber, $action, $photo_path);
         
         if ($insert_stmt->execute()) {
-            header("Location: index.php?status=Successfully recorded $action for " . urlencode($user['name']));
+            header("Location: ../public/index.php?status=Successfully recorded $action for " . urlencode($user['name']));
         } else {
-            header("Location: index.php?error=Failed to save record to the database");
+            header("Location: ../public/index.php?error=Database error.");
         }
     } else {
-        header("Location: index.php?error=ID Number not found in the system");
+        header("Location: ../public/index.php?error=ID Number not found.");
     }
     exit;
 }

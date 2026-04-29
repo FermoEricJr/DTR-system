@@ -91,7 +91,6 @@ if (!empty($dl_search)) {
 }
 
 if (!empty($dl_date)) {
-    // If a specific date is chosen, it overrides the timeframe dropdown
     $where_clauses_dl[] = "DATE(r.timestamp) = ?";
     $params_dl[] = $dl_date;
     $types_dl .= 's';
@@ -163,7 +162,6 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
         </div>
 
         <?php
-        // Display success or error messages from redirects
         if (isset($_GET['status'])) {
             echo "<div class='alert-success'>&#10004; " . htmlspecialchars($_GET['status']) . "</div>";
         }
@@ -173,7 +171,6 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
         ?>
 
         <div class="dashboard-grid">
-            <!-- User Management Section -->
             <div id="user-management" class="form-section">
                 <h3>Add New User</h3>
                 <form action="add_user.php" method="POST">
@@ -187,7 +184,6 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
                 </form>
             </div>
 
-            <!-- View Employee Records Section -->
             <div class="form-section">
                 <h3>View Employee Activity</h3>
                 <form action="dashboard.php" method="GET">
@@ -238,7 +234,7 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
                                         <td style="font-size: 0.9rem; color: var(--text-muted);"><?= date('M d, Y h:i A', strtotime($record['timestamp'])) ?></td>
                                         <td>
                                             <?php if (!empty($record['photo_path'])): ?>
-                                                <a href="../public/<?= htmlspecialchars($record['photo_path']) ?>" target="_blank" style="color: var(--primary); text-decoration: underline; font-size: 0.85rem;">View</a>
+                                                <a href="../<?= htmlspecialchars($record['photo_path']) ?>" target="_blank" style="color: var(--primary); text-decoration: underline; font-size: 0.85rem;">View</a>
                                             <?php else: ?>
                                                 <span style="color: var(--text-muted); font-size: 0.85rem;">-</span>
                                             <?php endif; ?>
@@ -253,18 +249,15 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
                 <?php endif; ?>
             </div>
 
-            <!-- Export Employee Records Section -->
             <div class="form-section full-width">
                 <h3>Download Reports & Preview</h3>
                 <form action="dashboard.php" method="GET" class="report-form" style="display: flex; flex-direction: row; gap: 15px; flex-wrap: wrap; align-items: flex-end;">
-                    <!-- Hidden inputs to preserve state -->
                     <input type="hidden" name="month" value="<?= htmlspecialchars($month) ?>">
                     <input type="hidden" name="year" value="<?= htmlspecialchars($year) ?>">
                     <?php if (isset($_GET['idnumber'])): ?>
                         <input type="hidden" name="idnumber" value="<?= htmlspecialchars($_GET['idnumber']) ?>">
                     <?php endif; ?>
 
-                    <!-- Search Bar -->
                     <div style="flex: 2; min-width: 250px;">
                         <label for="dl_search" style="display:block; margin-bottom: 5px;">Search by Name/ID:</label>
                         <div style="display:flex; gap: 5px;">
@@ -272,7 +265,6 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
                         </div>
                     </div>
 
-                    <!-- Employee Dropdown -->
                     <div style="flex: 1; min-width: 180px;">
                         <label for="dl_user" style="display:block; margin-bottom: 5px;">Employee:</label>
                         <select name="dl_user" id="dl_user" onchange="this.form.submit()" style="margin-bottom: 0;">
@@ -285,13 +277,11 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
                         </select>
                     </div>
                     
-                    <!-- Date Filter -->
                     <div style="flex: 1; min-width: 150px;">
                         <label for="dl_date" style="display:block; margin-bottom: 5px;">Specific Date:</label>
                         <input type="date" name="dl_date" id="dl_date" value="<?= htmlspecialchars($dl_date) ?>" onchange="this.form.submit()" style="margin-bottom: 0; padding: 6px 10px;">
                     </div>
 
-                    <!-- Timeframe Dropdown -->
                     <div style="flex: 1; min-width: 150px;">
                         <label for="dl_time" style="display:block; margin-bottom: 5px;">Or Timeframe:</label>
                         <select name="dl_time" id="dl_time" onchange="this.form.submit()" style="margin-bottom: 0;" <?= !empty($dl_date) ? 'disabled title="Clear Specific Date to use timeframe"' : '' ?>>
@@ -302,7 +292,6 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
                         </select>
                     </div>
                     
-                    <!-- Actions -->
                     <div style="flex: 1; min-width: 250px; display: flex; gap: 10px;">
                         <a href="download.php?dl_user=<?= urlencode($dl_user) ?>&dl_time=<?= urlencode($dl_time) ?>&dl_search=<?= urlencode($dl_search) ?>&dl_date=<?= urlencode($dl_date) ?>" class="btn" style="flex: 1; text-align: center; margin-bottom: 0; display: flex; align-items: center; justify-content: center;">Download CSV</a>
                         <a href="dashboard.php" class="btn btn-secondary" style="flex: 1; text-align: center; margin-bottom: 0; display: flex; align-items: center; justify-content: center;" title="Clear all filters">Clear</a>
@@ -325,7 +314,7 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
                                     <td style="font-size: 0.9rem; color: var(--text-muted);"><?= date('M d, Y h:i A', strtotime($rec['timestamp'])) ?></td>
                                     <td>
                                         <?php if (!empty($rec['photo_path'])): ?>
-                                            <a href="../public/<?= htmlspecialchars($rec['photo_path']) ?>" target="_blank" style="color: var(--primary); text-decoration: underline; font-size: 0.85rem;">View</a>
+                                            <a href="../<?= htmlspecialchars($rec['photo_path']) ?>" target="_blank" style="color: var(--primary); text-decoration: underline; font-size: 0.85rem;">View</a>
                                         <?php else: ?>
                                             <span style="color: var(--text-muted); font-size: 0.85rem;">-</span>
                                         <?php endif; ?>
@@ -337,7 +326,6 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
                 </div>
             </div>
 
-            <!-- Recent Photos Section -->
             <div class="form-section full-width">
                 <h3>Recent Employee Photos</h3>
                 <div class="table-responsive" style="max-height: 400px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: var(--radius); margin-top: 10px;">
@@ -356,8 +344,8 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
                             <?php else: foreach($recent_photos as $photo): ?>
                                 <tr>
                                     <td>
-                                        <a href="../public/<?= htmlspecialchars($photo['photo_path']) ?>" target="_blank" title="View Full Image">
-                                            <img src="../public/<?= htmlspecialchars($photo['photo_path']) ?>" alt="Selfie" style="width: 45px; height: 45px; object-fit: cover; border-radius: 50%; border: 2px solid var(--border-color); display: block; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">
+                                        <a href="../<?= htmlspecialchars($photo['photo_path']) ?>" target="_blank" title="View Full Image">
+                                            <img src="../<?= htmlspecialchars($photo['photo_path']) ?>" alt="Selfie" style="width: 45px; height: 45px; object-fit: cover; border-radius: 50%; border: 2px solid var(--border-color); display: block; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">
                                         </a>
                                     </td>
                                     <td style="vertical-align: middle; font-weight: 500;"><?= htmlspecialchars($photo['idnumber']) ?></td>
@@ -438,7 +426,6 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
 
     <script>
         function formatIdNumber(input) {
-            // Remove all non-digit characters
             let value = input.value.replace(/\D/g, '');
             if (value.length > 4) {
                 value = value.substring(0, 4) + '-' + value.substring(4, 9);
@@ -446,12 +433,11 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
             input.value = value;
         }
 
-        // Auto-dismiss alerts after 5 seconds
         setTimeout(() => {
             const alerts = document.querySelectorAll('.alert-success, .alert-error');
             alerts.forEach(alert => {
                 alert.style.opacity = '0';
-                setTimeout(() => alert.style.display = 'none', 500); // Hide completely after fade
+                setTimeout(() => alert.style.display = 'none', 500);
             });
         }, 5000);
     </script>
