@@ -23,6 +23,25 @@ if (isset($_GET['ajax_date'])) {
     exit;
 }
 
+// Cleanup selfies older than 30 days (1 month)
+$thirty_days_ago = date('Y-m-d H:i:s', strtotime('-30 days'));
+$cleanup_stmt = $conn->prepare("SELECT id, photo_path FROM records WHERE timestamp < ? AND photo_path IS NOT NULL AND photo_path != ''");
+$cleanup_stmt->bind_param("s", $thirty_days_ago);
+$cleanup_stmt->execute();
+$cleanup_result = $cleanup_stmt->get_result();
+
+while ($row = $cleanup_result->fetch_assoc()) {
+    $path1 = dirname(__DIR__) . '/' . $row['photo_path'];
+    $path2 = dirname(__DIR__) . '/public/' . $row['photo_path'];
+    
+    if (file_exists($path1)) { unlink($path1); }
+    if (file_exists($path2)) { unlink($path2); }
+    
+    $update_stmt = $conn->prepare("UPDATE records SET photo_path = NULL WHERE id = ?");
+    $update_stmt->bind_param("i", $row['id']);
+    $update_stmt->execute();
+}
+
 // Ensure position column exists in user table
 $check_col = $conn->query("SHOW COLUMNS FROM user LIKE 'position'");
 if ($check_col->num_rows == 0) {
