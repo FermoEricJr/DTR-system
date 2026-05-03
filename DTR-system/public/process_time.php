@@ -28,21 +28,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         
         if ($action === 'timeout' && $last_action !== 'timein') {
-            header("Location: ../public/index.php?error=You must Time In before you can Time Out.");
+            header("Location: index.php?error=You must Time In before you can Time Out.");
             exit;
         }
         if ($action === 'timein' && $last_action === 'timein') {
-            header("Location: ../public/index.php?error=You are already Timed In.");
+            header("Location: index.php?error=You are already Timed In.");
             exit;
         }
 
-        // 3. IMAGE HANDLING (assets/css/uploads/)
+        // 3. IMAGE HANDLING (uploads/)
         $photo_path = null;
-        if ($action === 'timein' && !empty($photo_data)) {
+        if (!empty($photo_data)) {
             
-            // Navigate to assets/css/uploads/
+            // Navigate to uploads/
             $base_dir = dirname(__DIR__); 
-            $upload_dir = $base_dir . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . 'css' . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR;
+            $upload_dir = $base_dir . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR;
             
             if (!is_dir($upload_dir)) {
                 mkdir($upload_dir, 0777, true);
@@ -58,9 +58,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 if (file_put_contents($filepath, $image_base64)) {
                     // Path to save in database for retrieval
-                    $photo_path = 'assets/css/uploads/' . $filename; 
+                    $photo_path = 'uploads/' . $filename; 
                 } else {
-                    header("Location: ../public/index.php?error=Failed to write image to CSS folder.");
+                    header("Location: index.php?error=Failed to write image to uploads folder.");
                     exit;
                 }
             }
@@ -71,12 +71,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $insert_stmt->bind_param("sss", $idnumber, $action, $photo_path);
         
         if ($insert_stmt->execute()) {
-            header("Location: ../public/index.php?status=Successfully recorded $action for " . urlencode($user['name']));
+            header("Location: index.php?status=Successfully recorded $action for " . urlencode($user['name']));
         } else {
-            header("Location: ../public/index.php?error=Database error.");
+            header("Location: index.php?error=Database error.");
         }
     } else {
-        header("Location: ../public/index.php?error=ID Number not found.");
+        header("Location: index.php?error=ID Number not found.");
     }
     exit;
 }

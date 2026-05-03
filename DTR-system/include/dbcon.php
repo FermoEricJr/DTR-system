@@ -5,7 +5,7 @@
     $servername = "localhost";
     $username = "root";
     $password = "";
-    $dbname = "DTRsystem";
+    $dbname = "dtrsystem";
 
     $conn = new mysqli($servername, $username, $password, $dbname);
 

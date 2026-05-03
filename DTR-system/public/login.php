@@ -31,17 +31,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Admin Login</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Login - WMSU DTR</title>
     <link rel="stylesheet" href="../assets/css/style.css">
+    <link rel="stylesheet" href="../assets/css/login.css">
 </head>
 <body>
-    <header>
-        <h1>Western Mindanao State University</h1>
-        <p>Admin Portal</p>
-    </header>
-    <div class="container">
+    <div class="login-overlay"></div>
+    <div class="login-card">
         <h2>Admin Login</h2>
+        <p class="subtitle">WMSU Daily Time Record System</p>
+        
         <?php if ($error): ?><div class="alert-error">&#9888; <?= $error ?></div><?php endif; ?>
+        
         <form method="POST">
             <label>Admin ID:</label>
             <input type="text" name="idnumber" required>
@@ -49,6 +51,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <input type="password" name="password" required>
             <button type="submit" style="width: 100%;">Login</button>
         </form>
+        
+        <div style="margin-top: 25px; font-size: 14px;">
+            <a href="index.php" style="color: var(--primary); text-decoration: none; font-weight: 600;">&larr; Back to Public Portal</a>
+        </div>
     </div>
 </body>
 </html>

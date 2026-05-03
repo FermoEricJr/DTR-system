@@ -1,0 +1,37 @@
+        body {
+            background: url('https://images.unsplash.com/photo-1541339907198-e08756dedf3f?ixlib=rb-1.2.1&auto=format&fit=crop&w=1950&q=80') center/cover no-repeat;
+            background-attachment: fixed;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .login-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(153, 0, 0, 0.85); /* WMSU Crimson Overlay */
+            z-index: 1;
+        }
+        .login-card {
+            background: #fff;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.2);
+            width: 100%;
+            max-width: 420px;
+            z-index: 2;
+            position: relative;
+            text-align: center;
+        }
+        .login-card h2 {
+            color: var(--primary);
+            margin-bottom: 5px;
+            font-size: 28px;
+        }
+        .login-card p.subtitle {
+            color: var(--text-muted);
+            margin-bottom: 25px;
+            margin-top: 0;
+        }
+        .login-card form { text-align: left; }

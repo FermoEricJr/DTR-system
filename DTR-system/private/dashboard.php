@@ -7,6 +7,28 @@ if (!isset($_SESSION['admin_logged_in'])) {
 
 include '../include/dbcon.php';
 
+// Handle AJAX request for day records
+if (isset($_GET['ajax_date'])) {
+    $date = $_GET['ajax_date'];
+    $stmt = $conn->prepare("SELECT r.idnumber, u.name, r.record_type, r.timestamp, u.position, r.photo_path FROM records r LEFT JOIN user u ON r.idnumber = u.idnumber WHERE DATE(r.timestamp) = ? ORDER BY r.timestamp ASC");
+    $stmt->bind_param("s", $date);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $records = [];
+    while ($row = $result->fetch_assoc()) {
+        $records[] = $row;
+    }
+    header('Content-Type: application/json');
+    echo json_encode($records);
+    exit;
+}
+
+// Ensure position column exists in user table
+$check_col = $conn->query("SHOW COLUMNS FROM user LIKE 'position'");
+if ($check_col->num_rows == 0) {
+    $conn->query("ALTER TABLE user ADD COLUMN position VARCHAR(100) DEFAULT 'Employee'");
+}
+
 // Fetch data for the calendar (current month)
 if (isset($_GET['month_year']) && !empty($_GET['month_year'])) {
     list($year, $month) = explode('-', $_GET['month_year']);
@@ -53,16 +75,37 @@ while($row = $users_result->fetch_assoc()) {
 // Fetch records for a specific user if selected
 $selected_user_records = [];
 $selected_user_name = '';
+$selected_user_position = '';
+$emp_stats = ['weekly_timeins' => 0, 'monthly_timeins' => 0];
+
 if (isset($_GET['idnumber']) && !empty($_GET['idnumber'])) {
+    $emp_id = $_GET['idnumber'];
+    
+    // Get user name separately so the card works even if they have zero records yet
+    $name_stmt = $conn->prepare("SELECT name, position FROM user WHERE idnumber = ?");
+    $name_stmt->bind_param("s", $emp_id);
+    $name_stmt->execute();
+    $name_res = $name_stmt->get_result();
+    if ($row = $name_res->fetch_assoc()) {
+        $selected_user_name = $row['name'];
+        $selected_user_position = $row['position'] ?? 'Employee';
+    }
+
+    // Get activity history records
     $stmt = $conn->prepare("SELECT u.name, r.record_type, r.timestamp, r.photo_path FROM records r JOIN user u ON r.idnumber = u.idnumber WHERE r.idnumber = ? ORDER BY r.timestamp DESC");
-    $stmt->bind_param("s", $_GET['idnumber']);
+    $stmt->bind_param("s", $emp_id);
     $stmt->execute();
     $user_records_result = $stmt->get_result();
     while($row = $user_records_result->fetch_assoc()) {
         $selected_user_records[] = $row;
     }
-    if (!empty($selected_user_records)) {
-        $selected_user_name = $selected_user_records[0]['name'];
+    
+    // Get activity statistics for the specific card
+    $stats_stmt = $conn->prepare("SELECT SUM(CASE WHEN record_type = 'timein' AND YEARWEEK(timestamp, 1) = YEARWEEK(CURDATE(), 1) THEN 1 ELSE 0 END) as weekly_timeins, SUM(CASE WHEN record_type = 'timein' AND MONTH(timestamp) = MONTH(CURDATE()) AND YEAR(timestamp) = YEAR(CURDATE()) THEN 1 ELSE 0 END) as monthly_timeins FROM records WHERE idnumber = ?");
+    $stats_stmt->bind_param("s", $emp_id);
+    $stats_stmt->execute();
+    if ($stats_row = $stats_stmt->get_result()->fetch_assoc()) {
+        $emp_stats = $stats_row;
     }
 }
 
@@ -130,37 +173,28 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
     <meta charset="UTF-8">
     <title>Admin Dashboard</title>
     <link rel="stylesheet" href="../assets/css/style.css">
-    <style>
-        .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; margin-top: 15px; }
-        .calendar-day-header { text-align: center; font-weight: bold; background: #f0f0f0; padding: 5px; border-radius: 4px; color: #333; }
-        .calendar-day { min-height: 80px; border: 1px solid #ddd; border-radius: 4px; padding: 5px; background: #fafafa; display: flex; flex-direction: column; }
-        .calendar-day.empty { background: transparent; border: none; }
-        .calendar-day.today { border: 2px solid #007bff; background: #e9f5ff; }
-        .day-number { font-weight: bold; margin-bottom: 5px; color: #555; }
-        .day-stats { font-size: 0.8em; display: flex; flex-direction: column; gap: 2px; }
-        .stat-in { color: #28a745; background: #e6f4ea; padding: 2px 4px; border-radius: 3px; display: inline-block; }
-        .stat-out { color: #dc3545; background: #fce8e8; padding: 2px 4px; border-radius: 3px; display: inline-block; }
-        
-        .report-form { display: flex; flex-direction: column; gap: 10px; }
-        .report-form select, .report-form button { padding: 8px; border-radius: 4px; border: 1px solid #ccc; font-family: inherit;}
-        .report-form button { background: #007bff; color: white; border: none; cursor: pointer; }
-        .report-form button:hover { background: #0056b3; }
-    </style>
+    <link rel="stylesheet" href="../assets/css/dashboard.css">
 </head>
 <body>
-    <header>
-        <h1>Western Mindanao State University</h1>
-        <p>Admin Dashboard</p>
+    <header class="admin-header">
+        <div class="header-brand">
+            <img src="../assets/img/logo.jpg" alt="WMSU Logo" class="header-logo">
+            <div class="header-title">
+                <h1>Western Mindanao State University</h1>
+                <p>Daily Time Record • Admin Dashboard</p>
+            </div>
+        </div>
+        <div class="header-actions">
+            <div class="admin-profile">
+                <div class="admin-avatar"><?= strtoupper(substr($_SESSION['admin_name'], 0, 1)) ?></div>
+                <span class="admin-greeting">Hi, <?= htmlspecialchars($_SESSION['admin_name']) ?></span>
+            </div>
+            <a href="../public/index.php" class="header-btn btn-portal">🌐 Public Portal</a>
+            <a href="logout.php" class="header-btn btn-logout">🚪 Logout</a>
+        </div>
     </header>
 
     <div class="container dashboard-container">
-        <h2>Welcome, <?= htmlspecialchars($_SESSION['admin_name']) ?> (Admin)</h2>
-
-        <div class="action-links">
-            <a href="../public/index.php" class="btn btn-secondary">Back to Public Portal</a>
-            <a href="logout.php" class="btn" style="background-color: #e53e3e;">Logout Admin</a>
-        </div>
-
         <?php
         if (isset($_GET['status'])) {
             echo "<div class='alert-success'>&#10004; " . htmlspecialchars($_GET['status']) . "</div>";
@@ -172,7 +206,7 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
 
         <div class="dashboard-grid">
             <div id="user-management" class="form-section">
-                <h3>Add New User</h3>
+                <h3 style="display: flex; align-items: center; gap: 10px;">👤 Add New User</h3>
                 <form action="add_user.php" method="POST">
                     <label for="name">Full Name:</label>
                     <input type="text" id="name" name="name" placeholder="e.g. Juan Dela Cruz" required>
@@ -180,12 +214,21 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
                     <label for="idnumber">ID Number:</label>
                     <input type="text" id="idnumber" name="idnumber" required placeholder="XXXX-XXXXX" pattern="[0-9]{4}-[0-9]{4,5}" title="Please use the format XXXX-XXXX or XXXX-XXXXX" oninput="formatIdNumber(this)">
                     
+                    <label for="position">Position / Role:</label>
+                    <select id="position" name="position" style="margin-bottom: 24px;">
+                        <option value="Employee">Employee</option>
+                        <option value="Intern">Intern</option>
+                        <option value="Manager">Manager</option>
+                        <option value="Staff">Staff</option>
+                        <option value="Faculty">Faculty</option>
+                    </select>
+                    
                     <button type="submit">Add User</button>
                 </form>
             </div>
 
             <div class="form-section">
-                <h3>View Employee Activity</h3>
+                <h3 style="display: flex; align-items: center; gap: 10px;">📅 View Employee Activity</h3>
                 <form action="dashboard.php" method="GET">
                     <input type="hidden" name="month" value="<?= htmlspecialchars($month) ?>">
                     <input type="hidden" name="year" value="<?= htmlspecialchars($year) ?>">
@@ -212,8 +255,37 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
                     </select>
                 </form>
 
-                <?php if (!empty($selected_user_records)): ?>
-                    <h4 style="margin-top: 20px; margin-bottom: 10px; color: var(--text-main);">Records for <?= htmlspecialchars($selected_user_name) ?></h4>
+                <?php if (isset($_GET['idnumber']) && !empty($_GET['idnumber']) && !empty($selected_user_name)): ?>
+                    <div class="employee-card" style="display: flex; flex-wrap: wrap; gap: 20px; align-items: center; background: linear-gradient(to right, rgba(153,0,0,0.03), transparent); padding: 20px; border-radius: 12px; border: 1px solid var(--border-color); margin-top: 20px;">
+                        <div style="width: 60px; height: 60px; background: var(--primary); color: var(--secondary); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.8rem; font-weight: 700; box-shadow: 0 4px 10px rgba(153,0,0,0.2); border: 2px solid var(--secondary);">
+                            <?= strtoupper(substr($selected_user_name, 0, 1)) ?>
+                        </div>
+                        <div style="flex: 1; min-width: 150px;">
+                            <h4 style="margin: 0 0 6px 0; font-size: 1.2rem; color: var(--text-main);"><?= htmlspecialchars($selected_user_name) ?></h4>
+                            <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                                <span style="background: #fff; padding: 4px 12px; border-radius: 50px; font-size: 0.8rem; color: var(--text-muted); font-weight: 600; border: 1px solid #e2e8f0; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">ID: <?= htmlspecialchars($_GET['idnumber']) ?></span>
+                                <span style="background: #ebf8ff; padding: 4px 12px; border-radius: 50px; font-size: 0.8rem; color: #2b6cb0; font-weight: 600; border: 1px solid #bee3f8; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">Role: <?= htmlspecialchars($selected_user_position) ?></span>
+                                <button onclick="openEditModal()" class="btn-secondary" style="padding: 4px 12px; font-size: 0.75rem; border-radius: 50px; box-shadow: none; margin: 0; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #cbd5e1;">✏️ Edit Profile</button>
+                                <form action="delete_user.php" method="POST" style="display: inline; width: auto;" onsubmit="return confirm('Are you sure you want to delete this employee and all their records? This action cannot be undone.');">
+                                    <input type="hidden" name="idnumber" value="<?= htmlspecialchars($_GET['idnumber']) ?>">
+                                    <button type="submit" style="padding: 4px 12px; font-size: 0.75rem; border-radius: 50px; box-shadow: none; margin: 0; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #fecaca; background: #fff5f5; color: #c53030; transition: all 0.2s;">🗑️ Delete</button>
+                                </form>
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 12px;">
+                            <div style="background: #fff; padding: 12px 18px; border-radius: 10px; text-align: center; border: 1px solid var(--border-color); box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
+                                <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700; margin-bottom: 4px; letter-spacing: 0.5px;">This Week</div>
+                                <div style="font-size: 1.1rem; font-weight: 700; color: #166534; display: flex; align-items: baseline; justify-content: center; gap: 4px;"><?= $emp_stats['weekly_timeins'] ?: 0 ?> <span style="font-size: 0.75rem; color: #64748b; font-weight: 500;">Time Ins</span></div>
+                            </div>
+                            <div style="background: #fff; padding: 12px 18px; border-radius: 10px; text-align: center; border: 1px solid var(--border-color); box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
+                                <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700; margin-bottom: 4px; letter-spacing: 0.5px;">This Month</div>
+                                <div style="font-size: 1.1rem; font-weight: 700; color: #166534; display: flex; align-items: baseline; justify-content: center; gap: 4px;"><?= $emp_stats['monthly_timeins'] ?: 0 ?> <span style="font-size: 0.75rem; color: #64748b; font-weight: 500;">Time Ins</span></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <?php if (!empty($selected_user_records)): ?>
+                    <h4 style="margin-top: 24px; margin-bottom: 12px; color: var(--text-main); font-size: 1rem;">Activity History</h4>
                     <div class="table-responsive" style="max-height: 250px; overflow-y: auto;">
                         <table class="user-records-table">
                             <thead>
@@ -244,14 +316,17 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
                             </tbody>
                         </table>
                     </div>
+                    <?php else: ?>
+                        <p style="color: var(--text-muted); text-align: center; padding: 20px;">No historical records found for this employee.</p>
+                    <?php endif; ?>
                 <?php elseif(isset($_GET['idnumber']) && !empty($_GET['idnumber'])): ?>
                     <p style="color: var(--text-muted); text-align: center; padding: 20px;">No records found for the selected employee.</p>
                 <?php endif; ?>
             </div>
 
             <div class="form-section full-width">
-                <h3>Download Reports & Preview</h3>
-                <form action="dashboard.php" method="GET" class="report-form" style="display: flex; flex-direction: row; gap: 15px; flex-wrap: wrap; align-items: flex-end;">
+                <h3 style="display: flex; align-items: center; gap: 10px;">📥 Download Reports & Preview</h3>
+                <form action="dashboard.php" method="GET" class="report-form" style="display: flex; flex-direction: row; gap: 15px; flex-wrap: wrap; align-items: flex-end; background: #f8fafc; padding: 20px; border-radius: 8px; border: 1px solid var(--border-color);">
                     <input type="hidden" name="month" value="<?= htmlspecialchars($month) ?>">
                     <input type="hidden" name="year" value="<?= htmlspecialchars($year) ?>">
                     <?php if (isset($_GET['idnumber'])): ?>
@@ -298,9 +373,9 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
                     </div>
                 </form>
 
-                <div class="table-responsive" style="max-height: 250px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: var(--radius); margin-top: 20px;">
-                    <table class="user-records-table" style="margin-top: 0; border: none;">
-                        <thead style="position: sticky; top: 0; z-index: 1; background: #f8fafc; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+                <div class="table-responsive" style="max-height: 250px; overflow-y: auto; margin-top: 20px;">
+                    <table class="user-records-table">
+                        <thead style="position: sticky; top: 0; z-index: 1;">
                             <tr><th>ID Number</th><th>Name</th><th>Record Type</th><th>Timestamp</th><th>Photo</th></tr>
                         </thead>
                         <tbody>
@@ -327,12 +402,12 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
             </div>
 
             <div class="form-section full-width">
-                <h3>Recent Employee Photos</h3>
-                <div class="table-responsive" style="max-height: 400px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: var(--radius); margin-top: 10px;">
-                    <table class="user-records-table" style="margin-top: 0; border: none;">
-                        <thead style="position: sticky; top: 0; z-index: 1; background: #f8fafc; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+                <h3 style="display: flex; align-items: center; gap: 10px;">📸 Recent Employee Photos</h3>
+                <div class="table-responsive" style="max-height: 400px; overflow-y: auto; margin-top: 10px;">
+                    <table class="user-records-table">
+                        <thead style="position: sticky; top: 0; z-index: 1;">
                             <tr>
-                                <th>Photo</th>
+                                <th style="text-align: center; width: 80px;">Photo</th>
                                 <th>ID Number</th>
                                 <th>Name</th>
                                 <th>Timestamp</th>
@@ -343,9 +418,9 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
                                 <tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 20px;">No recent photos available.</td></tr>
                             <?php else: foreach($recent_photos as $photo): ?>
                                 <tr>
-                                    <td>
+                                    <td style="text-align: center;">
                                         <a href="../<?= htmlspecialchars($photo['photo_path']) ?>" target="_blank" title="View Full Image">
-                                            <img src="../<?= htmlspecialchars($photo['photo_path']) ?>" alt="Selfie" style="width: 45px; height: 45px; object-fit: cover; border-radius: 50%; border: 2px solid var(--border-color); display: block; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">
+                                            <img src="../<?= htmlspecialchars($photo['photo_path']) ?>" alt="Selfie" style="width: 50px; height: 50px; object-fit: cover; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.15); display: inline-block; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">
                                         </a>
                                     </td>
                                     <td style="vertical-align: middle; font-weight: 500;"><?= htmlspecialchars($photo['idnumber']) ?></td>
@@ -380,7 +455,7 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
                     <?php if (isset($_GET['dl_date'])): ?>
                         <input type="hidden" name="dl_date" value="<?= htmlspecialchars($_GET['dl_date']) ?>">
                     <?php endif; ?>
-                    <h2 style="margin: 0;">System Activity</h2>
+                    <h2 style="margin: 0; display: flex; align-items: center; gap: 8px;">📈 System Activity</h2>
                     <input type="month" name="month_year" value="<?= sprintf('%04d-%02d', $year, $month) ?>" onchange="this.form.submit()" style="margin: 0; padding: 6px 10px; border: 1px solid var(--border-color); border-radius: var(--radius); font-family: inherit; font-size: 1rem; color: var(--text-main); background: #f8fafc; cursor: pointer;">
                 </form>
                 <a href="?month=<?= $nextMonth ?>&year=<?= $nextYear ?><?= $idParam ?><?= $dlParam ?>">Next &raquo;</a>
@@ -408,8 +483,9 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
                     $timeout = $calendar_data[$date_str]['timeout'] ?? 0;
                     
                     $isToday = ($date_str == date('Y-m-d')) ? 'today' : '';
+                    $onclick = ($timein > 0 || $timeout > 0) ? "onclick='openDayModal(\"$date_str\")' style='cursor: pointer;' title='Click to view records'" : "";
                     
-                    echo "<div class='calendar-day $isToday'>";
+                    echo "<div class='calendar-day $isToday' $onclick>";
                     echo "<div class='day-number'>$day</div>";
                     if ($timein > 0 || $timeout > 0) {
                         echo "<div class='day-stats'>";
@@ -424,7 +500,112 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
         </div>
     </div>
 
+    <!-- Edit User Modal -->
+    <?php if (isset($_GET['idnumber']) && !empty($_GET['idnumber']) && !empty($selected_user_name)): ?>
+    <div id="editUserModal" class="modal">
+        <div class="modal-content" style="text-align: left;">
+            <h3 style="margin-top: 0; margin-bottom: 20px; border-bottom: none; padding-bottom: 0; color: var(--text-main);">✏️ Edit Employee Profile</h3>
+            <form action="edit_user.php" method="POST">
+                <input type="hidden" name="idnumber" value="<?= htmlspecialchars($_GET['idnumber']) ?>">
+                
+                <label for="edit_name">Full Name:</label>
+                <input type="text" id="edit_name" name="name" value="<?= htmlspecialchars($selected_user_name) ?>" required>
+                
+                <label for="edit_position">Position / Role:</label>
+                <select id="edit_position" name="position" style="margin-bottom: 24px;">
+                    <option value="Employee" <?= $selected_user_position == 'Employee' ? 'selected' : '' ?>>Employee</option>
+                    <option value="Intern" <?= $selected_user_position == 'Intern' ? 'selected' : '' ?>>Intern</option>
+                    <option value="Manager" <?= $selected_user_position == 'Manager' ? 'selected' : '' ?>>Manager</option>
+                    <option value="Staff" <?= $selected_user_position == 'Staff' ? 'selected' : '' ?>>Staff</option>
+                    <option value="Faculty" <?= $selected_user_position == 'Faculty' ? 'selected' : '' ?>>Faculty</option>
+                </select>
+                
+                <div class="button-group">
+                    <button type="submit">Save Changes</button>
+                    <button type="button" class="btn-secondary" onclick="closeEditModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <?php endif; ?>
+    
+    <!-- Day Records Modal -->
+    <div id="dayRecordsModal" class="modal">
+        <div class="modal-content" style="text-align: left; max-width: 600px; width: 95%;">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--border-color); padding-bottom: 15px; margin-bottom: 20px;">
+                <h3 style="margin: 0; border: none; padding: 0; display: flex; align-items: center; gap: 10px;" id="dayModalTitle">📅 Records for Date</h3>
+                <button type="button" class="btn-secondary" onclick="closeDayModal()" style="padding: 6px 12px; flex: none; font-size: 0.8rem; margin: 0;">Close</button>
+            </div>
+            <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                <table class="user-records-table">
+                    <thead style="position: sticky; top: 0; z-index: 1;">
+                        <tr><th style="text-align: center; width: 60px;">Photo</th><th>Name</th><th>ID</th><th>Type</th><th>Time</th></tr>
+                    </thead>
+                    <tbody id="dayRecordsBody">
+                        <tr><td colspan="5" style="text-align: center; padding: 20px; color: var(--text-muted);">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
     <script>
+        function openDayModal(dateStr) {
+            document.getElementById('dayRecordsModal').style.display = 'flex';
+            
+            const dateObj = new Date(dateStr + 'T00:00:00');
+            const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+            document.getElementById('dayModalTitle').innerHTML = '📅 Records for ' + dateObj.toLocaleDateString('en-US', options);
+            
+            const tbody = document.getElementById('dayRecordsBody');
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: var(--text-muted);">Loading records...</td></tr>';
+            
+            fetch('dashboard.php?ajax_date=' + encodeURIComponent(dateStr))
+                .then(response => response.json())
+                .then(data => {
+                    if (data.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: var(--text-muted);">No records found for this day.</td></tr>';
+                        return;
+                    }
+                    let html = '';
+                    data.forEach(rec => {
+                        const typeClass = rec.record_type === 'timein' ? 'badge-timein' : 'badge-timeout';
+                        const typeText = rec.record_type.charAt(0).toUpperCase() + rec.record_type.slice(1);
+                        const timeObj = new Date(rec.timestamp.replace(' ', 'T'));
+                        const timeStr = timeObj.toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit'});
+                        const photoHtml = rec.photo_path 
+                            ? `<a href="../${rec.photo_path}" target="_blank"><img src="../${rec.photo_path}" alt="Selfie" style="width: 40px; height: 40px; object-fit: cover; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.15);"></a>`
+                            : `<span style="color: var(--text-muted); font-size: 0.85rem;">-</span>`;
+                        html += `<tr>
+                            <td style="text-align: center;">${photoHtml}</td>
+                            <td>
+                                <div style="font-weight: 600;">${rec.name || 'Unknown'}</div>
+                                <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">${rec.position || 'Employee'}</div>
+                            </td>
+                            <td style="vertical-align: middle;">${rec.idnumber}</td>
+                            <td style="vertical-align: middle;"><span class="badge ${typeClass}">${typeText}</span></td>
+                            <td style="font-size: 0.9rem; color: var(--text-muted); vertical-align: middle;">${timeStr}</td>
+                        </tr>`;
+                    });
+                    tbody.innerHTML = html;
+                })
+                .catch(err => {
+                    console.error(err);
+                    tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #c53030;">Error loading records. Please try again.</td></tr>';
+                });
+        }
+
+        function closeDayModal() {
+            document.getElementById('dayRecordsModal').style.display = 'none';
+        }
+
+        function openEditModal() {
+            document.getElementById('editUserModal').style.display = 'flex';
+        }
+        function closeEditModal() {
+            document.getElementById('editUserModal').style.display = 'none';
+        }
+
         function formatIdNumber(input) {
             let value = input.value.replace(/\D/g, '');
             if (value.length > 4) {

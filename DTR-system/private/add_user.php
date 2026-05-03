@@ -10,6 +10,7 @@ include '../include/dbcon.php';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $idnumber = $_POST['idnumber'] ?? '';
     $name = $_POST['name'] ?? '';
+    $position = $_POST['position'] ?? 'Employee';
     $status = '';
     $error = '';
 
@@ -32,8 +33,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = "User with this ID Number already exists.";
         } else {
             // 4. Insert new user
-            $insert_stmt = $conn->prepare("INSERT INTO user (idnumber, name) VALUES (?, ?)");
-            $insert_stmt->bind_param("ss", $idnumber, $name);
+            $insert_stmt = $conn->prepare("INSERT INTO user (idnumber, name, position) VALUES (?, ?, ?)");
+            $insert_stmt->bind_param("sss", $idnumber, $name, $position);
             if ($insert_stmt->execute()) {
                 $status = "User " . htmlspecialchars($name) . " added successfully.";
             } else {
