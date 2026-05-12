@@ -15,7 +15,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($result->num_rows > 0) {
         $user = $result->fetch_assoc();
         
-        // 2. Alternating Time In / Time Out logic
+        // --- NEW FEATURE: SESSION LIMIT LOGIC ---
+        $current_hour = (int)date('H'); // 24-hour format
+        $today = date('Y-m-d');
+        
+        // Define session boundaries (Adjust hours as needed)
+        // AM: 00:00 - 11:59 | PM: 12:00 - 23:59
+        $is_am = ($current_hour < 12);
+        $start_time = $is_am ? "$today 00:00:00" : "$today 12:00:00";
+        $end_time = $is_am ? "$today 11:59:59" : "$today 23:59:59";
+        $session_name = $is_am ? "Morning" : "Afternoon";
+
+        // Check if this action already exists for this user in this session
+        $session_check = $conn->prepare("SELECT id FROM records WHERE idnumber = ? AND record_type = ? AND timestamp BETWEEN ? AND ?");
+        $session_check->bind_param("ssss", $idnumber, $action, $start_time, $end_time);
+        $session_check->execute();
+        $session_result = $session_check->get_result();
+
+        if ($session_result->num_rows > 0) {
+            header("Location: index.php?error=You have already recorded a $action for the $session_name session.");
+            exit;
+        }
+        // --- END OF SESSION LIMIT LOGIC ---
+
+        // 2. Alternating Time In / Time Out logic (Keep this for sequential integrity)
         $check_stmt = $conn->prepare("SELECT record_type FROM records WHERE idnumber = ? ORDER BY timestamp DESC LIMIT 1");
         $check_stmt->bind_param("s", $idnumber);
         $check_stmt->execute();
@@ -36,11 +59,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
 
-        // 3. IMAGE HANDLING (uploads/)
+        // 3. IMAGE HANDLING
         $photo_path = null;
         if (!empty($photo_data)) {
-            
-            // Navigate to uploads/
             $base_dir = dirname(__DIR__); 
             $upload_dir = $base_dir . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR;
             
@@ -51,16 +72,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $image_parts = explode(";base64,", $photo_data);
             if (count($image_parts) == 2) {
                 $image_base64 = base64_decode($image_parts[1]);
-                
-                // REMOVED "selfie_" prefix - just using ID and timestamp string
                 $filename = $idnumber . '_' . time() . '.jpg';
                 $filepath = $upload_dir . $filename;
 
                 if (file_put_contents($filepath, $image_base64)) {
-                    // Path to save in database for retrieval
                     $photo_path = 'uploads/' . $filename; 
                 } else {
-                    header("Location: index.php?error=Failed to write image to uploads folder.");
+                    header("Location: index.php?error=Failed to write image.");
                     exit;
                 }
             }

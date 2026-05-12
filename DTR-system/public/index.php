@@ -75,33 +75,72 @@
     </div>
 
     <!-- Recent Activity Modal -->
-    <div id="recentActivityModal" class="modal">
-        <div class="modal-content" style="text-align: left; max-width: 450px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #f0f2f5; padding-bottom: 10px; margin-bottom: 15px;">
-                <h3 style="margin: 0; font-size: 1.1rem; color: #333; border: none; padding: 0;">📋 Recent Activity</h3>
-            </div>
-            <ul style="list-style: none; padding: 0; margin: 0; max-height: 350px; overflow-y: auto;">
-                <?php if ($recent_result && $recent_result->num_rows > 0): ?>
-                    <?php while($row = $recent_result->fetch_assoc()): ?>
-                        <li style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #f0f2f5;">
-                            <div>
-                                <div style="font-weight: 600; font-size: 0.95rem; color: var(--text-main);"><?= htmlspecialchars($row['name']) ?></div>
-                                <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;"><?= date('M d, Y h:i A', strtotime($row['timestamp'])) ?></div>
-                            </div>
-                            <span style="font-size: 0.7rem; padding: 4px 8px; border-radius: 50px; font-weight: 600; background: <?= $row['record_type'] === 'timein' ? '#ebf8ff' : '#fff5f5' ?>; color: <?= $row['record_type'] === 'timein' ? '#2b6cb0' : '#c53030' ?>; border: 1px solid <?= $row['record_type'] === 'timein' ? '#bee3f8' : '#fed7d7' ?>;">
-                                <?= htmlspecialchars(ucfirst($row['record_type'])) ?>
-                            </span>
-                        </li>
-                    <?php endwhile; ?>
-                <?php else: ?>
-                    <li style="text-align: center; color: var(--text-muted); font-size: 0.9rem; padding: 20px 0;">No recent activity yet.</li>
-                <?php endif; ?>
-            </ul>
-            <div style="margin-top: 20px;">
-                <button type="button" class="btn-secondary" onclick="closeRecentActivityModal()" style="width: 100%;">Close</button>
-            </div>
+<div id="recentActivityModal" class="modal">
+    <div class="modal-content" style="text-align: left; max-width: 600px; width: 90%;">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #f0f2f5; padding-bottom: 10px; margin-bottom: 15px;">
+            <h3 style="margin: 0; font-size: 1.1rem; color: #333; border: none; padding: 0;">📋 Recent Activity</h3>
+        </div>
+
+        <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+                <thead>
+                    <tr style="background: #f8fafc; text-align: left;">
+                        <th style="padding: 10px; border-bottom: 2px solid #e2e8f0;">Name</th>
+                        <th style="padding: 10px; border-bottom: 2px solid #e2e8f0; text-align: center;">Morning</th>
+                        <th style="padding: 10px; border-bottom: 2px solid #e2e8f0; text-align: center;">Afternoon</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if ($recent_result && $recent_result->num_rows > 0): ?>
+                        <?php while($row = $recent_result->fetch_assoc()): 
+                            $time = strtotime($row['timestamp']);
+                            $hour = (int)date('H', $time);
+                            $formatted_time = date('h:i A', $time);
+                            $is_am = ($hour < 12);
+                        ?>
+                            <tr style="border-bottom: 1px solid #f0f2f5;">
+                                <td style="padding: 12px 10px;">
+                                    <div style="font-weight: 600; color: #334155;"><?= htmlspecialchars($row['name']) ?></div>
+                                    <div style="font-size: 0.75rem; color: #94a3b8;"><?= date('M d, Y', $time) ?></div>
+                                </td>
+                                
+                                <!-- Morning Column -->
+                                <td style="padding: 10px; text-align: center;">
+                                    <?php if ($is_am): ?>
+                                        <span style="font-size: 0.7rem; padding: 4px 8px; border-radius: 4px; font-weight: 600; background: <?= $row['record_type'] === 'timein' ? '#ebf8ff' : '#fff5f5' ?>; color: <?= $row['record_type'] === 'timein' ? '#2b6cb0' : '#c53030' ?>; border: 1px solid <?= $row['record_type'] === 'timein' ? '#bee3f8' : '#fed7d7' ?>;">
+                                            <?= htmlspecialchars(ucfirst($row['record_type'])) ?>: <?= $formatted_time ?>
+                                        </span>
+                                    <?php else: ?>
+                                        <span style="color: #cbd5e1;">--</span>
+                                    <?php endif; ?>
+                                </td>
+
+                                <!-- Afternoon Column -->
+                                <td style="padding: 10px; text-align: center;">
+                                    <?php if (!$is_am): ?>
+                                        <span style="font-size: 0.7rem; padding: 4px 8px; border-radius: 4px; font-weight: 600; background: <?= $row['record_type'] === 'timein' ? '#ebf8ff' : '#fff5f5' ?>; color: <?= $row['record_type'] === 'timein' ? '#2b6cb0' : '#c53030' ?>; border: 1px solid <?= $row['record_type'] === 'timein' ? '#bee3f8' : '#fed7d7' ?>;">
+                                            <?= htmlspecialchars(ucfirst($row['record_type'])) ?>: <?= $formatted_time ?>
+                                        </span>
+                                    <?php else: ?>
+                                        <span style="color: #cbd5e1;">--</span>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                        <?php endwhile; ?>
+                    <?php else: ?>
+                        <tr>
+                            <td colspan="3" style="text-align: center; color: #94a3b8; padding: 30px 0;">No recent activity yet.</td>
+                        </tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+
+        <div style="margin-top: 20px;">
+            <button type="button" class="btn-secondary" onclick="closeRecentActivityModal()" style="width: 100%;">Close</button>
         </div>
     </div>
+</div>
 
     <!-- Camera Modal -->
     <div id="cameraModal" class="modal">
