@@ -4,6 +4,10 @@
     // Fetch recent activity
     $recent_query = "SELECT u.name, r.record_type, r.timestamp FROM records r JOIN user u ON r.idnumber = u.idnumber ORDER BY r.timestamp DESC LIMIT 5";
     $recent_result = $conn->query($recent_query);
+
+    // Fetch college cutoff times
+    $colleges_cutoff_query = "SELECT name, morning_cutoff, afternoon_cutoff FROM colleges ORDER BY name ASC";
+    $colleges_cutoff_result = $conn->query($colleges_cutoff_query);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -31,7 +35,7 @@
 
     <div class="hero-section">
         <h2 style="color: white; text-shadow: 0 2px 4px rgba(0,0,0,0.6);">Attendance Logs</h2>
-        <p>Welcome to the WMSU Daily Time Record System. Log your attendace quickly and securely.</p>
+        <p>Welcome to the WMSU Daily Time Record System. Log your attendance quickly and securely.</p>
     </div>
 
     <!-- NEW GRID LAYOUT -->
@@ -85,11 +89,25 @@
         <div class="info-panel">
 
             <div class="info-card">
-                <h3>System Notice</h3>
-                <p>
-                    New users must select their college before first time-in.
-                    Once recorded, college assignment cannot be changed without admin approval.
-                </p>
+                <h3>College Cutoff Times</h3>
+                <div class="cutoff-list-container">
+                    <?php if ($colleges_cutoff_result && $colleges_cutoff_result->num_rows > 0): ?>
+                        <?php while($col = $colleges_cutoff_result->fetch_assoc()): 
+                            $m_cutoff = date('h:i A', strtotime($col['morning_cutoff']));
+                            $a_cutoff = date('h:i A', strtotime($col['afternoon_cutoff']));
+                        ?>
+                        <div style="margin-bottom: 12px; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px;">
+                            <div style="font-weight: 600; font-size: 13px; color: #1e293b; margin-bottom: 4px;"><?= htmlspecialchars($col['name']) ?></div>
+                            <div style="font-size: 12px; color: #64748b; display: flex; justify-content: space-between; gap: 10px;">
+                                <span>AM Cutoff: <strong style="color: #990000;"><?= $m_cutoff ?></strong></span>
+                                <span>PM Cutoff: <strong style="color: #990000;"><?= $a_cutoff ?></strong></span>
+                            </div>
+                        </div>
+                        <?php endwhile; ?>
+                    <?php else: ?>
+                        <p style="font-size: 13px; color: #64748b; margin: 0;">No colleges registered yet.</p>
+                    <?php endif; ?>
+                </div>
             </div>
 
             <div class="info-card">

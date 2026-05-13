@@ -14,9 +14,8 @@ body {
 
 /* HEADER */
 header {
-    background: linear-gradient(135deg, rgba(153, 0, 0, 0.98) 0%, rgba(122, 0, 0, 0.98) 100%);
+    background: linear-gradient(135deg, rgba(192, 11, 11, 0.98) 0%, rgba(95, 3, 3, 0.98) 100%);
     backdrop-filter: blur(10px);
-    border-bottom: 3px solid #ffffff;
     color: white;
     padding: 16px 40px;
     padding-left: 40px;
@@ -72,6 +71,7 @@ header p {
     display: flex;
     flex-direction: column;
     margin-top: 65px;
+    width: 100%;
 }
 
 /* HERO */
@@ -81,6 +81,8 @@ header p {
     color: white;
     text-align: center;
     padding: 60px 20px;
+    width: 100%;
+    box-sizing: border-box;
 }
 
 /* DASHBOARD LAYOUT (NEW) */
@@ -263,6 +265,29 @@ input[type="text"]:focus {
 .alert-error {
     background: #f8d7da;
     color: #721c24;
+}
+
+/* SCROLLABLE CUTOFF LIST */
+.cutoff-list-container {
+    max-height: 180px; /* Fits approximately 3 colleges before forcing scroll */
+    overflow-y: auto;
+    padding-right: 8px;
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 #f1f5f9;
+}
+.cutoff-list-container::-webkit-scrollbar {
+    width: 6px;
+}
+.cutoff-list-container::-webkit-scrollbar-track {
+    background: #f1f5f9;
+    border-radius: 4px;
+}
+.cutoff-list-container::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+}
+.cutoff-list-container::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
 }
 
 .modal-content {
