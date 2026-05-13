@@ -21,9 +21,9 @@
 
 <header>
     <div class="branding">
+        <img src="../assets/img/logo.png" class="header-logo">
         <h1>WESTERN MINDANAO STATE UNIVERSITY</h1>
         <p>DAILY TIME RECORD SYSTEM</p>
-        <img src="../assets/img/logo.png" class="header-logo" alt="School Logo">
     </div>
 </header>
 
