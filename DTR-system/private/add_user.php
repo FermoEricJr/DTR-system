@@ -13,6 +13,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $position = $_POST['position'] ?? 'Employee';
     $email = $_POST['email'] ?? '';
     $verification_code = $_POST['verification_code'] ?? '';
+    $college_id = $_POST['college_id'] ?? null;
     $status = '';
     $error = '';
 
@@ -50,8 +51,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             // 5. Insert new user with the verified email
-            $insert_stmt = $conn->prepare("INSERT INTO user (idnumber, name, position, email) VALUES (?, ?, ?, ?)");
-            $insert_stmt->bind_param("ssss", $idnumber, $name, $position, $email);
+            $insert_stmt = $conn->prepare("INSERT INTO user (idnumber, name, position, email, college_id) VALUES (?, ?, ?, ?, ?)");
+            $insert_stmt->bind_param("ssssi", $idnumber, $name, $position, $email, $college_id);
             if ($insert_stmt->execute()) {
                 $status = "User " . htmlspecialchars($name) . " added successfully.";
                 unset($_SESSION['verification_code']);

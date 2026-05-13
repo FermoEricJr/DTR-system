@@ -1,17 +1,29 @@
 CREATE DATABASE IF NOT EXISTS DTRsystem;
 USE DTRsystem;
 
+CREATE TABLE IF NOT EXISTS colleges (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(150) NOT NULL UNIQUE
+);
+
 CREATE TABLE IF NOT EXISTS user (
     id INT AUTO_INCREMENT PRIMARY KEY,
     idnumber VARCHAR(50) NOT NULL UNIQUE,
-    name VARCHAR(100) NOT NULL
+    name VARCHAR(100) NOT NULL,
+    position VARCHAR(100) DEFAULT 'Employee',
+    email VARCHAR(255) NULL,
+    college_id INT NULL,
+    FOREIGN KEY (college_id) REFERENCES colleges(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS admin (
     id INT AUTO_INCREMENT PRIMARY KEY,
     idnumber VARCHAR(50) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
-    name VARCHAR(100) NOT NULL
+    name VARCHAR(100) NOT NULL,
+    role ENUM('superadmin', 'college_admin') DEFAULT 'superadmin',
+    college_id INT NULL,
+    FOREIGN KEY (college_id) REFERENCES colleges(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS records (

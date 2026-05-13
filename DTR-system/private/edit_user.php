@@ -11,6 +11,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $idnumber = $_POST['idnumber'] ?? '';
     $name = $_POST['name'] ?? '';
     $position = $_POST['position'] ?? 'Employee';
+    $college_id = $_POST['college_id'] ?? null;
     $status = '';
     $error = '';
 
@@ -19,8 +20,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = "Name cannot be empty.";
     } else {
         // Update the user details
-        $stmt = $conn->prepare("UPDATE user SET name = ?, position = ? WHERE idnumber = ?");
-        $stmt->bind_param("sss", $name, $position, $idnumber);
+        $stmt = $conn->prepare("UPDATE user SET name = ?, position = ?, college_id = ? WHERE idnumber = ?");
+        $stmt->bind_param("ssis", $name, $position, $college_id, $idnumber);
         
         if ($stmt->execute()) {
             $status = "User " . htmlspecialchars($name) . "'s profile updated successfully.";

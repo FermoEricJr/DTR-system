@@ -10,8 +10,21 @@ include '../include/dbcon.php';
 // Handle AJAX request for day records
 if (isset($_GET['ajax_date'])) {
     $date = $_GET['ajax_date'];
-    $stmt = $conn->prepare("SELECT r.id, r.idnumber, u.name, r.record_type, r.timestamp, u.position, r.photo_path FROM records r LEFT JOIN user u ON r.idnumber = u.idnumber WHERE DATE(r.timestamp) = ? ORDER BY r.timestamp ASC");
-    $stmt->bind_param("s", $date);
+    
+    $admin_q = $conn->prepare("SELECT role, college_id FROM admin WHERE name = ? LIMIT 1");
+    $admin_q->bind_param("s", $_SESSION['admin_name']);
+    $admin_q->execute();
+    $adm_d = $admin_q->get_result()->fetch_assoc();
+    $a_role = $adm_d['role'] ?? 'superadmin';
+    $a_cid = $adm_d['college_id'] ?? null;
+    
+    if ($a_role === 'college_admin' && $a_cid) {
+        $stmt = $conn->prepare("SELECT r.id, r.idnumber, u.name, r.record_type, r.timestamp, u.position, r.photo_path FROM records r JOIN user u ON r.idnumber = u.idnumber WHERE DATE(r.timestamp) = ? AND u.college_id = ? ORDER BY r.timestamp ASC");
+        $stmt->bind_param("si", $date, $a_cid);
+    } else {
+        $stmt = $conn->prepare("SELECT r.id, r.idnumber, u.name, r.record_type, r.timestamp, u.position, r.photo_path FROM records r LEFT JOIN user u ON r.idnumber = u.idnumber WHERE DATE(r.timestamp) = ? ORDER BY r.timestamp ASC");
+        $stmt->bind_param("s", $date);
+    }
     $stmt->execute();
     $result = $stmt->get_result();
     $records = [];
@@ -42,10 +55,33 @@ while ($row = $cleanup_result->fetch_assoc()) {
     $update_stmt->execute();
 }
 
-// Ensure position column exists in user table
-$check_col = $conn->query("SHOW COLUMNS FROM user LIKE 'position'");
-if ($check_col->num_rows == 0) {
-    $conn->query("ALTER TABLE user ADD COLUMN position VARCHAR(100) DEFAULT 'Employee'");
+// Auto-migration for Superadmin/College feature
+$conn->query("CREATE TABLE IF NOT EXISTS colleges (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(150) NOT NULL UNIQUE)");
+$check_admin_role = $conn->query("SHOW COLUMNS FROM admin LIKE 'role'");
+if ($check_admin_role->num_rows == 0) {
+    $conn->query("ALTER TABLE admin ADD COLUMN role ENUM('superadmin', 'college_admin') DEFAULT 'superadmin', ADD COLUMN college_id INT NULL, ADD FOREIGN KEY (college_id) REFERENCES colleges(id) ON DELETE SET NULL");
+    $conn->query("UPDATE admin SET role = 'superadmin'");
+}
+$check_user_college = $conn->query("SHOW COLUMNS FROM user LIKE 'college_id'");
+if ($check_user_college->num_rows == 0) {
+    $conn->query("ALTER TABLE user ADD COLUMN college_id INT NULL, ADD FOREIGN KEY (college_id) REFERENCES colleges(id) ON DELETE SET NULL");
+}
+
+// Fetch current admin role
+$admin_query = $conn->prepare("SELECT role, college_id FROM admin WHERE name = ? LIMIT 1");
+$admin_query->bind_param("s", $_SESSION['admin_name']);
+$admin_query->execute();
+$admin_data = $admin_query->get_result()->fetch_assoc();
+$admin_role = $admin_data['role'] ?? 'superadmin';
+$admin_college_id = $admin_data['college_id'] ?? null;
+
+// Fetch all colleges for dropdowns
+$colleges_result = $conn->query("SELECT id, name FROM colleges ORDER BY name ASC");
+$all_colleges = [];
+if ($colleges_result) {
+    while($row = $colleges_result->fetch_assoc()) {
+        $all_colleges[] = $row;
+    }
 }
 
 // Fetch data for the calendar (current month)
@@ -66,13 +102,12 @@ $nextMonth = $month + 1;
 $nextYear = $year;
 if ($nextMonth == 13) { $nextMonth = 1; $nextYear++; }
 
-$calendar_query = "SELECT 
-                    DATE(timestamp) as date, 
-                    SUM(CASE WHEN record_type = 'timein' THEN 1 ELSE 0 END) as timein_count,
-                    SUM(CASE WHEN record_type = 'timeout' THEN 1 ELSE 0 END) as timeout_count
-                FROM records 
-                WHERE MONTH(timestamp) = '$month' AND YEAR(timestamp) = '$year'
-                GROUP BY DATE(timestamp)";
+$calendar_query = "SELECT DATE(r.timestamp) as date, SUM(CASE WHEN r.record_type = 'timein' THEN 1 ELSE 0 END) as timein_count, SUM(CASE WHEN r.record_type = 'timeout' THEN 1 ELSE 0 END) as timeout_count FROM records r ";
+if ($admin_role === 'college_admin' && $admin_college_id) {
+    $calendar_query .= " JOIN user u ON r.idnumber = u.idnumber WHERE u.college_id = '$admin_college_id' AND MONTH(r.timestamp) = '$month' AND YEAR(r.timestamp) = '$year' GROUP BY DATE(r.timestamp)";
+} else {
+    $calendar_query .= " WHERE MONTH(r.timestamp) = '$month' AND YEAR(r.timestamp) = '$year' GROUP BY DATE(r.timestamp)";
+}
 $calendar_result = $conn->query($calendar_query);
 
 $calendar_data = [];
@@ -84,11 +119,27 @@ while ($row = $calendar_result->fetch_assoc()) {
 }
 
 // Fetch all users for the dropdown
-$users_result = $conn->query("SELECT idnumber, name FROM user ORDER BY name ASC");
+$users_sql = "SELECT u.idnumber, u.name, u.position, u.email, u.college_id, c.name as college_name FROM user u LEFT JOIN colleges c ON u.college_id = c.id";
+if ($admin_role === 'college_admin' && $admin_college_id) {
+    $users_sql .= " WHERE u.college_id = '$admin_college_id'";
+}
+$users_sql .= " ORDER BY u.name ASC";
+$users_result = $conn->query($users_sql);
 
 $all_users = [];
 while($row = $users_result->fetch_assoc()) {
     $all_users[] = $row;
+}
+
+$college_admins = [];
+if ($admin_role === 'superadmin') {
+    $admins_sql = "SELECT a.idnumber, a.name, a.college_id, c.name as college_name FROM admin a LEFT JOIN colleges c ON a.college_id = c.id WHERE a.role = 'college_admin' ORDER BY a.name ASC";
+    $admins_result = $conn->query($admins_sql);
+    if ($admins_result) {
+        while($row = $admins_result->fetch_assoc()) {
+            $college_admins[] = $row;
+        }
+    }
 }
 
 // Fetch records for a specific user if selected
@@ -101,7 +152,7 @@ if (isset($_GET['idnumber']) && !empty($_GET['idnumber'])) {
     $emp_id = $_GET['idnumber'];
     
     // Get user name separately so the card works even if they have zero records yet
-    $name_stmt = $conn->prepare("SELECT name, position, email FROM user WHERE idnumber = ?");
+    $name_stmt = $conn->prepare("SELECT name, position, email, college_id FROM user WHERE idnumber = ?");
     $name_stmt->bind_param("s", $emp_id);
     $name_stmt->execute();
     $name_res = $name_stmt->get_result();
@@ -109,6 +160,7 @@ if (isset($_GET['idnumber']) && !empty($_GET['idnumber'])) {
         $selected_user_name = $row['name'];
         $selected_user_position = $row['position'] ?? 'Employee';
         $selected_user_email = $row['email'] ?? '';
+        $selected_user_college_id = $row['college_id'] ?? null;
     }
 
     // Get activity history records
@@ -134,6 +186,7 @@ $dl_user = $_GET['dl_user'] ?? 'all';
 $dl_time = $_GET['dl_time'] ?? 'all';
 $dl_search = $_GET['dl_search'] ?? '';
 $dl_date = $_GET['dl_date'] ?? '';
+$dl_college = $_GET['dl_college'] ?? '';
 
 $where_clauses_dl = [];
 $params_dl = [];
@@ -151,6 +204,16 @@ if (!empty($dl_search)) {
     $params_dl[] = $search_term;
     $params_dl[] = $search_term;
     $types_dl .= 'ss';
+}
+
+if ($admin_role === 'college_admin' && $admin_college_id) {
+    $where_clauses_dl[] = "u.college_id = ?";
+    $params_dl[] = $admin_college_id;
+    $types_dl .= 'i';
+} elseif ($admin_role === 'superadmin' && !empty($dl_college)) {
+    $where_clauses_dl[] = "u.college_id = ?";
+    $params_dl[] = $dl_college;
+    $types_dl .= 'i';
 }
 
 if (!empty($dl_date)) {
@@ -183,18 +246,26 @@ if ($types_dl) {
 
 $preview_records = $preview_result ? $preview_result->fetch_all(MYSQLI_ASSOC) : [];
 
-$recent_photos_query = "SELECT r.id, r.idnumber, u.name, r.photo_path, r.timestamp FROM records r LEFT JOIN user u ON r.idnumber = u.idnumber WHERE r.photo_path IS NOT NULL AND r.photo_path != '' ORDER BY r.timestamp DESC LIMIT 20";
+$recent_photos_query = "SELECT r.id, r.idnumber, u.name, r.photo_path, r.timestamp FROM records r LEFT JOIN user u ON r.idnumber = u.idnumber WHERE r.photo_path IS NOT NULL AND r.photo_path != ''";
+if ($admin_role === 'college_admin' && $admin_college_id) {
+    $recent_photos_query .= " AND u.college_id = '$admin_college_id'";
+}
+$recent_photos_query .= " ORDER BY r.timestamp DESC LIMIT 20";
 $recent_photos_result = $conn->query($recent_photos_query);
 $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI_ASSOC) : [];
 
 // Fetch Quick Stats for Dashboard Overview
-$stat_emp_query = $conn->query("SELECT COUNT(*) as count FROM user");
+$college_filter_user = ($admin_role === 'college_admin' && $admin_college_id) ? " WHERE college_id = '$admin_college_id'" : "";
+$stat_emp_query = $conn->query("SELECT COUNT(*) as count FROM user" . $college_filter_user);
 $total_emp = $stat_emp_query ? $stat_emp_query->fetch_assoc()['count'] : 0;
 
-$stat_today_query = $conn->query("SELECT COUNT(*) as count FROM records WHERE DATE(timestamp) = CURDATE() AND record_type = 'timein'");
+$join_u = ($admin_role === 'college_admin' && $admin_college_id) ? " JOIN user u ON r.idnumber = u.idnumber " : "";
+$where_u = ($admin_role === 'college_admin' && $admin_college_id) ? " u.college_id = '$admin_college_id' AND " : "";
+
+$stat_today_query = $conn->query("SELECT COUNT(*) as count FROM records r $join_u WHERE $where_u DATE(r.timestamp) = CURDATE() AND r.record_type = 'timein'");
 $total_today_in = $stat_today_query ? $stat_today_query->fetch_assoc()['count'] : 0;
 
-$stat_month_query = $conn->query("SELECT COUNT(*) as count FROM records WHERE MONTH(timestamp) = MONTH(CURDATE()) AND YEAR(timestamp) = YEAR(CURDATE())");
+$stat_month_query = $conn->query("SELECT COUNT(*) as count FROM records r $join_u WHERE $where_u MONTH(r.timestamp) = MONTH(CURDATE()) AND YEAR(r.timestamp) = YEAR(CURDATE())");
 $total_month_records = $stat_month_query ? $stat_month_query->fetch_assoc()['count'] : 0;
 
 // Fetch current cutoff settings
@@ -229,7 +300,7 @@ $afternoon_formatted = date('H:i', strtotime($afternoon_cutoff));
         <div class="header-actions" id="headerActions">
             <div class="admin-profile">
                 <div class="admin-avatar"><?= strtoupper(substr($_SESSION['admin_name'], 0, 1)) ?></div>
-                <span class="admin-greeting">Hi, <?= htmlspecialchars($_SESSION['admin_name']) ?></span>
+                <span class="admin-greeting" style="line-height: 1.2;">Hi, <?= htmlspecialchars($_SESSION['admin_name']) ?> <br><small style="font-size: 0.7rem; color: #ffd700; font-weight: 700;"><?= $admin_role === 'superadmin' ? '⭐ Superadmin' : '🏢 College Admin' ?></small></span>
             </div>
             <a href="../public/index.php" class="header-btn btn-portal">🌐 Public Portal</a>
             <a href="logout.php" class="header-btn btn-logout">🚪 Logout</a>
@@ -290,6 +361,44 @@ $afternoon_formatted = date('H:i', strtotime($afternoon_cutoff));
                     </div>
                 </form>
             </div>
+            
+            <?php if ($admin_role === 'superadmin'): ?>
+            <div id="manage-colleges" class="form-section">
+                <h3 style="display: flex; align-items: center; gap: 10px;">🏢 Add New College</h3>
+                <form action="add_college.php" method="POST" class="filter-container" style="margin-bottom: 0;">
+                    <div class="filter-row">
+                        <div class="filter-group large">
+                            <label for="college_name">College Name:</label>
+                            <input type="text" name="college_name" id="college_name" placeholder="e.g. College of Engineering" required>
+                        </div>
+                        <div class="filter-actions" style="min-width: auto; flex: none;">
+                            <button type="submit">Add College</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            
+            <div id="manage-admins" class="form-section">
+                <h3 style="display: flex; align-items: center; gap: 10px;">🛡️ Add College Admin</h3>
+                <form action="add_admin.php" method="POST" class="report-form">
+                    <label for="admin_idnumber">Admin Username / ID:</label>
+                    <input type="text" id="admin_idnumber" name="idnumber" required>
+                    <label for="admin_name">Admin Full Name:</label>
+                    <input type="text" id="admin_name" name="name" required>
+                    <label for="admin_password">Password:</label>
+                    <input type="password" id="admin_password" name="password" required>
+                    <label for="admin_college">Assign to College:</label>
+                    <select id="admin_college" name="college_id" required>
+                        <option value="">-- Select a College --</option>
+                        <?php foreach($all_colleges as $college): ?>
+                            <option value="<?= $college['id'] ?>"><?= htmlspecialchars($college['name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <button type="submit">Create Admin</button>
+                </form>
+            </div>
+
+            <?php endif; ?>
 
             <div id="user-management" class="form-section">
                 <h3 style="display: flex; align-items: center; gap: 10px;">👤 Add New User</h3>
@@ -320,9 +429,85 @@ $afternoon_formatted = date('H:i', strtotime($afternoon_cutoff));
                         <option value="Faculty">Faculty</option>
                     </select>
                     
+                    <label for="college_id">College Assignment:</label>
+                    <?php if ($admin_role === 'superadmin'): ?>
+                        <select id="college_id" name="college_id" required>
+                            <option value="">-- Select a College --</option>
+                            <?php foreach($all_colleges as $college): ?>
+                                <option value="<?= $college['id'] ?>"><?= htmlspecialchars($college['name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    <?php else: ?>
+                        <input type="hidden" name="college_id" value="<?= $admin_college_id ?>">
+                        <?php $college_name = ''; foreach($all_colleges as $c) { if($c['id'] == $admin_college_id) $college_name = $c['name']; } ?>
+                        <input type="text" value="<?= htmlspecialchars($college_name) ?>" disabled style="background: #e2e8f0; cursor: not-allowed; margin-bottom: 20px;">
+                    <?php endif; ?>
+                    
                     <button type="submit">Add User</button>
                 </form>
             </div>
+
+            <div id="employee-directory" class="form-section full-width">
+                <h3 style="display: flex; align-items: center; gap: 10px;">📋 Registered Employees</h3>
+                <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                    <table class="user-records-table">
+                        <thead style="position: sticky; top: 0; z-index: 1;">
+                            <tr><th>ID Number</th><th>Name</th><th>Position</th><th>Email</th><th>College</th><th>Action</th></tr>
+                        </thead>
+                        <tbody>
+                            <?php if (empty($all_users)): ?>
+                                <tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 20px;">No registered employees found.</td></tr>
+                            <?php else: foreach($all_users as $emp): ?>
+                                <tr>
+                                    <td style="font-weight: 500;"><?= htmlspecialchars($emp['idnumber']) ?></td>
+                                    <td><?= htmlspecialchars($emp['name']) ?></td>
+                                    <td><span class="badge" style="background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1;"><?= htmlspecialchars($emp['position'] ?? 'Employee') ?></span></td>
+                                    <td style="font-size: 0.9rem; color: var(--text-muted);"><?= htmlspecialchars($emp['email'] ?: 'N/A') ?></td>
+                                    <td>
+                                        <span class="badge badge-timein" style="background: #e2e8f0 !important; color: #475569 !important; border-color: #cbd5e1 !important;"><?= htmlspecialchars($emp['college_name'] ?? 'Unassigned') ?></span>
+                                    </td>
+                                    <td>
+                                        <a href="dashboard.php?idnumber=<?= urlencode($emp['idnumber']) ?>#user-management" class="btn-secondary" style="padding: 4px 12px; font-size: 0.75rem; border-radius: 50px; text-decoration: none; border: 1px solid #cbd5e1; display: inline-flex; align-items: center; box-shadow: none;">🔍 View Activity</a>
+                                    </td>
+                                </tr>
+                            <?php endforeach; endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <?php if ($admin_role === 'superadmin'): ?>
+            <div id="college-admins-list" class="form-section full-width">
+                <h3 style="display: flex; align-items: center; gap: 10px;">👨‍💼 College Admins</h3>
+                <div class="table-responsive" style="max-height: 250px; overflow-y: auto;">
+                    <table class="user-records-table">
+                        <thead style="position: sticky; top: 0; z-index: 1;">
+                            <tr><th>ID Number</th><th>Name</th><th>Assigned College</th><th>Action</th></tr>
+                        </thead>
+                        <tbody>
+                            <?php if (empty($college_admins)): ?>
+                                <tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 20px;">No college admins found.</td></tr>
+                            <?php else: foreach($college_admins as $admin): ?>
+                                <tr>
+                                    <td><?= htmlspecialchars($admin['idnumber']) ?></td>
+                                    <td><?= htmlspecialchars($admin['name']) ?></td>
+                                    <td><span class="badge badge-timein" style="background: #e2e8f0 !important; color: #475569 !important; border-color: #cbd5e1 !important;"><?= htmlspecialchars($admin['college_name'] ?? 'Unassigned') ?></span></td>
+                                    <td>
+                                        <div style="display: flex; gap: 8px;">
+                                            <button type="button" class="btn-secondary" onclick="openEditAdminModal('<?= htmlspecialchars($admin['idnumber']) ?>', '<?= htmlspecialchars(addslashes($admin['name'])) ?>', '<?= $admin['college_id'] ?? '' ?>')" style="padding: 4px 12px; font-size: 0.75rem; border-radius: 50px; box-shadow: none; margin: 0; border: 1px solid #cbd5e1;">✏️ Edit</button>
+                                            <form action="delete_admin.php" method="POST" style="margin: 0;" onsubmit="return confirm('Are you sure you want to delete this college admin?');">
+                                                <input type="hidden" name="idnumber" value="<?= htmlspecialchars($admin['idnumber']) ?>">
+                                                <button type="submit" style="padding: 4px 12px; font-size: 0.75rem; border-radius: 50px; box-shadow: none; margin: 0; border: 1px solid #fecaca; background: #fff5f5; color: #c53030; transition: all 0.2s;">🗑️ Delete</button>
+                                            </form>
+                                        </div>
+                                    </td>
+                                </tr>
+                            <?php endforeach; endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <?php endif; ?>
 
             <div class="form-section full-width">
                 <h3 style="display: flex; align-items: center; gap: 10px;">📅 View Employee Activity</h3>
@@ -341,12 +526,29 @@ $afternoon_formatted = date('H:i', strtotime($afternoon_cutoff));
                     <?php if (isset($_GET['dl_date'])): ?>
                         <input type="hidden" name="dl_date" value="<?= htmlspecialchars($_GET['dl_date']) ?>">
                     <?php endif; ?>
+                    <?php if (isset($_GET['dl_college'])): ?>
+                        <input type="hidden" name="dl_college" value="<?= htmlspecialchars($_GET['dl_college']) ?>">
+                    <?php endif; ?>
                     <div class="filter-row">
+                        <?php if ($admin_role === 'superadmin'): ?>
+                        <div class="filter-group">
+                            <label for="filter_college">Filter by College:</label>
+                            <select name="filter_college" id="filter_college" onchange="this.form.submit()">
+                                <option value="">All Colleges</option>
+                                <?php foreach($all_colleges as $college): ?>
+                                    <option value="<?= $college['id'] ?>" <?= (isset($_GET['filter_college']) && $_GET['filter_college'] == $college['id']) ? 'selected' : '' ?>>
+                                        <?= htmlspecialchars($college['name']) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <?php endif; ?>
                         <div class="filter-group">
                             <label for="user_select">Select Employee:</label>
                             <select name="idnumber" id="user_select" onchange="this.form.submit()">
                                 <option value="">-- Select an Employee --</option>
                                 <?php foreach($all_users as $user): ?>
+                                    <?php if (isset($_GET['filter_college']) && $_GET['filter_college'] !== '' && $user['college_id'] != $_GET['filter_college']) continue; ?>
                                     <option value="<?= htmlspecialchars($user['idnumber']) ?>" <?= (isset($_GET['idnumber']) && $_GET['idnumber'] == $user['idnumber']) ? 'selected' : '' ?>>
                                         <?= htmlspecialchars($user['name']) ?> (<?= htmlspecialchars($user['idnumber']) ?>)
                                     </option>
@@ -441,6 +643,9 @@ $afternoon_formatted = date('H:i', strtotime($afternoon_cutoff));
                     <?php if (isset($_GET['idnumber'])): ?>
                         <input type="hidden" name="idnumber" value="<?= htmlspecialchars($_GET['idnumber']) ?>">
                     <?php endif; ?>
+                    <?php if (isset($_GET['filter_college'])): ?>
+                        <input type="hidden" name="filter_college" value="<?= htmlspecialchars($_GET['filter_college']) ?>">
+                    <?php endif; ?>
 
                     <div class="filter-row">
                         <div class="filter-group large">
@@ -448,11 +653,26 @@ $afternoon_formatted = date('H:i', strtotime($afternoon_cutoff));
                             <input type="search" name="dl_search" id="dl_search" placeholder="Enter name or ID..." value="<?= htmlspecialchars($dl_search) ?>" onchange="this.form.submit()">
                         </div>
 
+                        <?php if ($admin_role === 'superadmin'): ?>
+                        <div class="filter-group">
+                            <label for="dl_college">College:</label>
+                            <select name="dl_college" id="dl_college" onchange="this.form.submit()">
+                                <option value="">All Colleges</option>
+                                <?php foreach($all_colleges as $college): ?>
+                                    <option value="<?= $college['id'] ?>" <?= ($dl_college == $college['id']) ? 'selected' : '' ?>>
+                                        <?= htmlspecialchars($college['name']) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <?php endif; ?>
+
                         <div class="filter-group">
                             <label for="dl_user">Employee:</label>
                             <select name="dl_user" id="dl_user" onchange="this.form.submit()">
                                 <option value="all">All Employees</option>
                                 <?php foreach($all_users as $user): ?>
+                                    <?php if ($admin_role === 'superadmin' && $dl_college !== '' && $user['college_id'] != $dl_college) continue; ?>
                                     <option value="<?= htmlspecialchars($user['idnumber']) ?>" <?= ($dl_user == $user['idnumber']) ? 'selected' : '' ?>>
                                         <?= htmlspecialchars($user['name']) ?>
                                     </option>
@@ -478,7 +698,7 @@ $afternoon_formatted = date('H:i', strtotime($afternoon_cutoff));
                         </div>
                         
                         <div class="filter-actions">
-                            <a href="download.php?dl_user=<?= urlencode($dl_user) ?>&dl_time=<?= urlencode($dl_time) ?>&dl_search=<?= urlencode($dl_search) ?>&dl_date=<?= urlencode($dl_date) ?>" class="btn">📥 Download CSV</a>
+                            <a href="download.php?dl_user=<?= urlencode($dl_user) ?>&dl_time=<?= urlencode($dl_time) ?>&dl_search=<?= urlencode($dl_search) ?>&dl_date=<?= urlencode($dl_date) ?>&dl_college=<?= urlencode($dl_college) ?>" class="btn">📥 Download CSV</a>
                             <a href="dashboard.php" class="btn btn-secondary" title="Clear all filters">❌ Clear</a>
                         </div>
                     </div>
@@ -553,7 +773,7 @@ $afternoon_formatted = date('H:i', strtotime($afternoon_cutoff));
 
         <div class="chart-container">
             <?php $idParam = isset($_GET['idnumber']) && !empty($_GET['idnumber']) ? '&idnumber=' . urlencode($_GET['idnumber']) : ''; ?>
-            <?php $dlParam = (isset($_GET['dl_user']) ? '&dl_user=' . urlencode($_GET['dl_user']) : '') . (isset($_GET['dl_time']) ? '&dl_time=' . urlencode($_GET['dl_time']) : '') . (isset($_GET['dl_search']) && !empty($_GET['dl_search']) ? '&dl_search=' . urlencode($_GET['dl_search']) : '') . (isset($_GET['dl_date']) && !empty($_GET['dl_date']) ? '&dl_date=' . urlencode($_GET['dl_date']) : ''); ?>
+            <?php $dlParam = (isset($_GET['dl_user']) ? '&dl_user=' . urlencode($_GET['dl_user']) : '') . (isset($_GET['dl_time']) ? '&dl_time=' . urlencode($_GET['dl_time']) : '') . (isset($_GET['dl_search']) && !empty($_GET['dl_search']) ? '&dl_search=' . urlencode($_GET['dl_search']) : '') . (isset($_GET['dl_date']) && !empty($_GET['dl_date']) ? '&dl_date=' . urlencode($_GET['dl_date']) : '') . (isset($_GET['dl_college']) && !empty($_GET['dl_college']) ? '&dl_college=' . urlencode($_GET['dl_college']) : '') . (isset($_GET['filter_college']) && !empty($_GET['filter_college']) ? '&filter_college=' . urlencode($_GET['filter_college']) : ''); ?>
             <div class="calendar-header-nav">
                 <a href="?month=<?= $prevMonth ?>&year=<?= $prevYear ?><?= $idParam ?><?= $dlParam ?>">&laquo; Previous</a>
                 <form action="dashboard.php" method="GET" style="display: flex; align-items: center; gap: 10px; margin: 0;">
@@ -571,6 +791,12 @@ $afternoon_formatted = date('H:i', strtotime($afternoon_cutoff));
                     <?php endif; ?>
                     <?php if (isset($_GET['dl_date'])): ?>
                         <input type="hidden" name="dl_date" value="<?= htmlspecialchars($_GET['dl_date']) ?>">
+                    <?php endif; ?>
+                    <?php if (isset($_GET['dl_college'])): ?>
+                        <input type="hidden" name="dl_college" value="<?= htmlspecialchars($_GET['dl_college']) ?>">
+                    <?php endif; ?>
+                    <?php if (isset($_GET['filter_college'])): ?>
+                        <input type="hidden" name="filter_college" value="<?= htmlspecialchars($_GET['filter_college']) ?>">
                     <?php endif; ?>
                     <h2 style="margin: 0; display: flex; align-items: center; gap: 8px;">📈 System Activity</h2>
                     <input type="month" name="month_year" value="<?= sprintf('%04d-%02d', $year, $month) ?>" onchange="this.form.submit()" style="margin: 0; padding: 6px 10px; border: 1px solid var(--border-color); border-radius: var(--radius); font-family: inherit; font-size: 1rem; color: var(--text-main); background: #f8fafc; cursor: pointer;">
@@ -643,9 +869,57 @@ $afternoon_formatted = date('H:i', strtotime($afternoon_cutoff));
                     <option value="Faculty" <?= $selected_user_position == 'Faculty' ? 'selected' : '' ?>>Faculty</option>
                 </select>
                 
+                <label for="edit_college_id">College Assignment:</label>
+                <?php if ($admin_role === 'superadmin'): ?>
+                    <select id="edit_college_id" name="college_id" required style="margin-bottom: 24px;">
+                        <option value="">-- Select a College --</option>
+                        <?php foreach($all_colleges as $college): ?>
+                            <option value="<?= $college['id'] ?>" <?= $selected_user_college_id == $college['id'] ? 'selected' : '' ?>><?= htmlspecialchars($college['name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                <?php else: ?>
+                    <input type="hidden" name="college_id" value="<?= $admin_college_id ?>">
+                    <?php $college_name = ''; foreach($all_colleges as $c) { if($c['id'] == $admin_college_id) $college_name = $c['name']; } ?>
+                    <input type="text" value="<?= htmlspecialchars($college_name) ?>" disabled style="background: #e2e8f0; cursor: not-allowed; margin-bottom: 24px;">
+                <?php endif; ?>
+
                 <div class="button-group">
                     <button type="submit">Save Changes</button>
                     <button type="button" class="btn-secondary" onclick="closeEditModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <?php endif; ?>
+
+    <!-- Edit College Admin Modal (Superadmin Only) -->
+    <?php if ($admin_role === 'superadmin'): ?>
+    <div id="editAdminModal" class="modal">
+        <div class="modal-content" style="text-align: left;">
+            <h3 style="margin-top: 0; margin-bottom: 20px; border-bottom: none; padding-bottom: 0; color: var(--text-main);">✏️ Edit College Admin</h3>
+            <form action="edit_admin.php" method="POST" class="report-form">
+                <input type="hidden" name="old_idnumber" id="edit_admin_old_idnumber">
+                
+                <label for="edit_admin_idnumber">Admin Username / ID:</label>
+                <input type="text" id="edit_admin_idnumber" name="idnumber" required>
+                
+                <label for="edit_admin_name">Full Name:</label>
+                <input type="text" id="edit_admin_name" name="name" required>
+                
+                <label for="edit_admin_password">New Password (leave blank to keep current):</label>
+                <input type="password" id="edit_admin_password" name="password">
+                
+                <label for="edit_admin_college">Assign to College:</label>
+                <select id="edit_admin_college" name="college_id" required style="margin-bottom: 24px;">
+                    <option value="">-- Select a College --</option>
+                    <?php foreach($all_colleges as $college): ?>
+                        <option value="<?= $college['id'] ?>"><?= htmlspecialchars($college['name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+
+                <div class="button-group">
+                    <button type="submit">Save Changes</button>
+                    <button type="button" class="btn-secondary" onclick="closeEditAdminModal()">Cancel</button>
                 </div>
             </form>
         </div>
@@ -761,6 +1035,18 @@ $afternoon_formatted = date('H:i', strtotime($afternoon_cutoff));
         }
         function closeEditModal() {
             document.getElementById('editUserModal').style.display = 'none';
+        }
+
+        function openEditAdminModal(idnumber, name, college_id) {
+            document.getElementById('edit_admin_old_idnumber').value = idnumber;
+            document.getElementById('edit_admin_idnumber').value = idnumber;
+            document.getElementById('edit_admin_name').value = name;
+            document.getElementById('edit_admin_password').value = '';
+            document.getElementById('edit_admin_college').value = college_id;
+            document.getElementById('editAdminModal').style.display = 'flex';
+        }
+        function closeEditAdminModal() {
+            document.getElementById('editAdminModal').style.display = 'none';
         }
 
         function openEmailModal() {
