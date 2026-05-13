@@ -3,7 +3,9 @@ USE DTRsystem;
 
 CREATE TABLE IF NOT EXISTS colleges (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(150) NOT NULL UNIQUE
+    name VARCHAR(150) NOT NULL UNIQUE,
+    morning_cutoff TIME DEFAULT '12:00:00',
+    afternoon_cutoff TIME DEFAULT '13:00:00'
 );
 
 CREATE TABLE IF NOT EXISTS user (

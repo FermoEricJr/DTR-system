@@ -66,6 +66,10 @@ $check_user_college = $conn->query("SHOW COLUMNS FROM user LIKE 'college_id'");
 if ($check_user_college->num_rows == 0) {
     $conn->query("ALTER TABLE user ADD COLUMN college_id INT NULL, ADD FOREIGN KEY (college_id) REFERENCES colleges(id) ON DELETE SET NULL");
 }
+$check_college_cutoff = $conn->query("SHOW COLUMNS FROM colleges LIKE 'morning_cutoff'");
+if ($check_college_cutoff && $check_college_cutoff->num_rows == 0) {
+    $conn->query("ALTER TABLE colleges ADD COLUMN morning_cutoff TIME DEFAULT '12:00:00', ADD COLUMN afternoon_cutoff TIME DEFAULT '13:00:00'");
+}
 
 // Fetch current admin role
 $admin_query = $conn->prepare("SELECT role, college_id FROM admin WHERE name = ? LIMIT 1");
@@ -76,7 +80,7 @@ $admin_role = $admin_data['role'] ?? 'superadmin';
 $admin_college_id = $admin_data['college_id'] ?? null;
 
 // Fetch all colleges for dropdowns
-$colleges_result = $conn->query("SELECT id, name FROM colleges ORDER BY name ASC");
+$colleges_result = $conn->query("SELECT id, name, IFNULL(morning_cutoff, '12:00:00') as morning_cutoff, IFNULL(afternoon_cutoff, '13:00:00') as afternoon_cutoff FROM colleges ORDER BY name ASC");
 $all_colleges = [];
 if ($colleges_result) {
     while($row = $colleges_result->fetch_assoc()) {
@@ -267,16 +271,6 @@ $total_today_in = $stat_today_query ? $stat_today_query->fetch_assoc()['count'] 
 
 $stat_month_query = $conn->query("SELECT COUNT(*) as count FROM records r $join_u WHERE $where_u MONTH(r.timestamp) = MONTH(CURDATE()) AND YEAR(r.timestamp) = YEAR(CURDATE())");
 $total_month_records = $stat_month_query ? $stat_month_query->fetch_assoc()['count'] : 0;
-
-// Fetch current cutoff settings
-$morning_res = $conn->query("SELECT setting_value FROM settings WHERE setting_key = 'morning_cutoff'");
-$morning_cutoff = ($morning_res && $morning_res->num_rows > 0) ? $morning_res->fetch_assoc()['setting_value'] : '12:00:00';
-
-$afternoon_res = $conn->query("SELECT setting_value FROM settings WHERE setting_key = 'afternoon_cutoff'");
-$afternoon_cutoff = ($afternoon_res && $afternoon_res->num_rows > 0) ? $afternoon_res->fetch_assoc()['setting_value'] : '13:00:00';
-
-$morning_formatted = date('H:i', strtotime($morning_cutoff));
-$afternoon_formatted = date('H:i', strtotime($afternoon_cutoff));
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -344,19 +338,37 @@ $afternoon_formatted = date('H:i', strtotime($afternoon_cutoff));
 
         <div class="dashboard-grid">
             <div id="system-settings" class="form-section">
-                <h3 style="display: flex; align-items: center; gap: 10px;">⚙️ System Settings</h3>
+                <h3 style="display: flex; align-items: center; gap: 10px;">⚙️ College Cutoff Settings</h3>
                 <form action="update_settings.php" method="POST" class="filter-container" style="margin-bottom: 0;">
                     <div class="filter-row">
+                        <?php if ($admin_role === 'superadmin'): ?>
+                        <div class="filter-group">
+                            <label for="settings_college_id">Select College:</label>
+                            <select name="college_id" id="settings_college_id" required onchange="updateCutoffFields()">
+                                <option value="">-- Select a College --</option>
+                                <?php foreach($all_colleges as $college): ?>
+                                    <option value="<?= $college['id'] ?>" data-morning="<?= date('H:i', strtotime($college['morning_cutoff'])) ?>" data-afternoon="<?= date('H:i', strtotime($college['afternoon_cutoff'])) ?>"><?= htmlspecialchars($college['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <?php else: ?>
+                            <input type="hidden" name="college_id" value="<?= $admin_college_id ?>">
+                            <?php $c_m = '12:00'; $c_a = '13:00'; $c_n = ''; foreach($all_colleges as $c) { if($c['id'] == $admin_college_id) { $c_m = date('H:i', strtotime($c['morning_cutoff'])); $c_a = date('H:i', strtotime($c['afternoon_cutoff'])); $c_n = $c['name']; } } ?>
+                            <div class="filter-group">
+                                <label>College:</label>
+                                <input type="text" value="<?= htmlspecialchars($c_n) ?>" disabled style="background: #e2e8f0; cursor: not-allowed; margin-bottom: 0;">
+                            </div>
+                        <?php endif; ?>
                         <div class="filter-group">
                             <label for="morning_cutoff">Morning Cutoff Time:</label>
-                            <input type="time" name="morning_cutoff" id="morning_cutoff" value="<?= htmlspecialchars($morning_formatted) ?>" required>
+                            <input type="time" name="morning_cutoff" id="morning_cutoff" value="<?= $admin_role === 'college_admin' ? $c_m : '' ?>" required <?= $admin_role === 'superadmin' ? 'disabled' : '' ?>>
                         </div>
                         <div class="filter-group">
                             <label for="afternoon_cutoff">Afternoon Cutoff Time:</label>
-                            <input type="time" name="afternoon_cutoff" id="afternoon_cutoff" value="<?= htmlspecialchars($afternoon_formatted) ?>" required>
+                            <input type="time" name="afternoon_cutoff" id="afternoon_cutoff" value="<?= $admin_role === 'college_admin' ? $c_a : '' ?>" required <?= $admin_role === 'superadmin' ? 'disabled' : '' ?>>
                         </div>
                         <div class="filter-actions" style="min-width: auto; flex: none;">
-                            <button type="submit">Update Settings</button>
+                            <button type="submit" id="update_settings_btn" <?= $admin_role === 'superadmin' ? 'disabled' : '' ?>>Update Settings</button>
                         </div>
                     </div>
                 </form>
@@ -378,6 +390,36 @@ $afternoon_formatted = date('H:i', strtotime($afternoon_cutoff));
                 </form>
             </div>
             
+            <div id="registered-colleges" class="form-section full-width">
+                <h3 style="display: flex; align-items: center; gap: 10px;">🏛️ Registered Colleges</h3>
+                <div class="table-responsive" style="max-height: 250px; overflow-y: auto;">
+                    <table class="user-records-table">
+                        <thead style="position: sticky; top: 0; z-index: 1;">
+                            <tr><th>ID</th><th>College Name</th><th>Action</th></tr>
+                        </thead>
+                        <tbody>
+                            <?php if (empty($all_colleges)): ?>
+                                <tr><td colspan="3" style="text-align: center; color: var(--text-muted); padding: 20px;">No colleges found.</td></tr>
+                            <?php else: foreach($all_colleges as $college): ?>
+                                <tr>
+                                    <td><?= htmlspecialchars($college['id']) ?></td>
+                                    <td style="font-weight: 500;"><?= htmlspecialchars($college['name']) ?></td>
+                                    <td>
+                                        <div style="display: flex; gap: 8px;">
+                                            <button type="button" class="btn-secondary" onclick="openEditCollegeModal('<?= htmlspecialchars($college['id']) ?>', '<?= htmlspecialchars(addslashes($college['name'])) ?>')" style="padding: 4px 12px; font-size: 0.75rem; border-radius: 50px; box-shadow: none; margin: 0; border: 1px solid #cbd5e1;">✏️ Edit</button>
+                                            <form action="delete_college.php" method="POST" style="margin: 0;" onsubmit="return confirm('Are you sure you want to delete this college? Employees and Admins assigned to this college will become Unassigned.');">
+                                                <input type="hidden" name="id" value="<?= htmlspecialchars($college['id']) ?>">
+                                                <button type="submit" style="padding: 4px 12px; font-size: 0.75rem; border-radius: 50px; box-shadow: none; margin: 0; border: 1px solid #fecaca; background: #fff5f5; color: #c53030; transition: all 0.2s;">🗑️ Delete</button>
+                                            </form>
+                                        </div>
+                                    </td>
+                                </tr>
+                            <?php endforeach; endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
             <div id="manage-admins" class="form-section">
                 <h3 style="display: flex; align-items: center; gap: 10px;">🛡️ Add College Admin</h3>
                 <form action="add_admin.php" method="POST" class="report-form">
@@ -926,6 +968,26 @@ $afternoon_formatted = date('H:i', strtotime($afternoon_cutoff));
     </div>
     <?php endif; ?>
 
+    <!-- Edit College Modal (Superadmin Only) -->
+    <?php if ($admin_role === 'superadmin'): ?>
+    <div id="editCollegeModal" class="modal">
+        <div class="modal-content" style="text-align: left;">
+            <h3 style="margin-top: 0; margin-bottom: 20px; border-bottom: none; padding-bottom: 0; color: var(--text-main);">✏️ Edit College</h3>
+            <form action="edit_college.php" method="POST" class="report-form">
+                <input type="hidden" name="id" id="edit_college_id">
+                
+                <label for="edit_college_name">College Name:</label>
+                <input type="text" id="edit_college_name" name="name" required>
+                
+                <div class="button-group">
+                    <button type="submit">Save Changes</button>
+                    <button type="button" class="btn-secondary" onclick="closeEditCollegeModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <?php endif; ?>
+
     <!-- Email User Modal -->
     <?php if (isset($_GET['idnumber']) && !empty($_GET['idnumber']) && !empty($selected_user_name)): ?>
     <div id="emailUserModal" class="modal">
@@ -1049,11 +1111,41 @@ $afternoon_formatted = date('H:i', strtotime($afternoon_cutoff));
             document.getElementById('editAdminModal').style.display = 'none';
         }
 
+        function openEditCollegeModal(id, name) {
+            document.getElementById('edit_college_id').value = id;
+            document.getElementById('edit_college_name').value = name;
+            document.getElementById('editCollegeModal').style.display = 'flex';
+        }
+        function closeEditCollegeModal() {
+            document.getElementById('editCollegeModal').style.display = 'none';
+        }
+
         function openEmailModal() {
             document.getElementById('emailUserModal').style.display = 'flex';
         }
         function closeEmailModal() {
             document.getElementById('emailUserModal').style.display = 'none';
+        }
+
+        function updateCutoffFields() {
+            const select = document.getElementById('settings_college_id');
+            const morningInput = document.getElementById('morning_cutoff');
+            const afternoonInput = document.getElementById('afternoon_cutoff');
+            const btn = document.getElementById('update_settings_btn');
+            if (select && select.value) {
+                const selectedOption = select.options[select.selectedIndex];
+                morningInput.value = selectedOption.getAttribute('data-morning');
+                afternoonInput.value = selectedOption.getAttribute('data-afternoon');
+                morningInput.disabled = false;
+                afternoonInput.disabled = false;
+                btn.disabled = false;
+            } else if (select) {
+                morningInput.value = '';
+                afternoonInput.value = '';
+                morningInput.disabled = true;
+                afternoonInput.disabled = true;
+                btn.disabled = true;
+            }
         }
 
         function verifyWmsuEmail() {
