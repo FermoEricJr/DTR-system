@@ -10,7 +10,7 @@ include '../include/dbcon.php';
 // Handle AJAX request for day records
 if (isset($_GET['ajax_date'])) {
     $date = $_GET['ajax_date'];
-    $stmt = $conn->prepare("SELECT r.idnumber, u.name, r.record_type, r.timestamp, u.position, r.photo_path FROM records r LEFT JOIN user u ON r.idnumber = u.idnumber WHERE DATE(r.timestamp) = ? ORDER BY r.timestamp ASC");
+    $stmt = $conn->prepare("SELECT r.id, r.idnumber, u.name, r.record_type, r.timestamp, u.position, r.photo_path FROM records r LEFT JOIN user u ON r.idnumber = u.idnumber WHERE DATE(r.timestamp) = ? ORDER BY r.timestamp ASC");
     $stmt->bind_param("s", $date);
     $stmt->execute();
     $result = $stmt->get_result();
@@ -101,17 +101,18 @@ if (isset($_GET['idnumber']) && !empty($_GET['idnumber'])) {
     $emp_id = $_GET['idnumber'];
     
     // Get user name separately so the card works even if they have zero records yet
-    $name_stmt = $conn->prepare("SELECT name, position FROM user WHERE idnumber = ?");
+    $name_stmt = $conn->prepare("SELECT name, position, email FROM user WHERE idnumber = ?");
     $name_stmt->bind_param("s", $emp_id);
     $name_stmt->execute();
     $name_res = $name_stmt->get_result();
     if ($row = $name_res->fetch_assoc()) {
         $selected_user_name = $row['name'];
         $selected_user_position = $row['position'] ?? 'Employee';
+        $selected_user_email = $row['email'] ?? '';
     }
 
     // Get activity history records
-    $stmt = $conn->prepare("SELECT u.name, r.record_type, r.timestamp, r.photo_path FROM records r JOIN user u ON r.idnumber = u.idnumber WHERE r.idnumber = ? ORDER BY r.timestamp DESC");
+    $stmt = $conn->prepare("SELECT r.id, u.name, r.record_type, r.timestamp, r.photo_path FROM records r JOIN user u ON r.idnumber = u.idnumber WHERE r.idnumber = ? ORDER BY r.timestamp DESC");
     $stmt->bind_param("s", $emp_id);
     $stmt->execute();
     $user_records_result = $stmt->get_result();
@@ -182,14 +183,35 @@ if ($types_dl) {
 
 $preview_records = $preview_result ? $preview_result->fetch_all(MYSQLI_ASSOC) : [];
 
-$recent_photos_query = "SELECT r.idnumber, u.name, r.photo_path, r.timestamp FROM records r LEFT JOIN user u ON r.idnumber = u.idnumber WHERE r.photo_path IS NOT NULL AND r.photo_path != '' ORDER BY r.timestamp DESC LIMIT 20";
+$recent_photos_query = "SELECT r.id, r.idnumber, u.name, r.photo_path, r.timestamp FROM records r LEFT JOIN user u ON r.idnumber = u.idnumber WHERE r.photo_path IS NOT NULL AND r.photo_path != '' ORDER BY r.timestamp DESC LIMIT 20";
 $recent_photos_result = $conn->query($recent_photos_query);
 $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI_ASSOC) : [];
+
+// Fetch Quick Stats for Dashboard Overview
+$stat_emp_query = $conn->query("SELECT COUNT(*) as count FROM user");
+$total_emp = $stat_emp_query ? $stat_emp_query->fetch_assoc()['count'] : 0;
+
+$stat_today_query = $conn->query("SELECT COUNT(*) as count FROM records WHERE DATE(timestamp) = CURDATE() AND record_type = 'timein'");
+$total_today_in = $stat_today_query ? $stat_today_query->fetch_assoc()['count'] : 0;
+
+$stat_month_query = $conn->query("SELECT COUNT(*) as count FROM records WHERE MONTH(timestamp) = MONTH(CURDATE()) AND YEAR(timestamp) = YEAR(CURDATE())");
+$total_month_records = $stat_month_query ? $stat_month_query->fetch_assoc()['count'] : 0;
+
+// Fetch current cutoff settings
+$morning_res = $conn->query("SELECT setting_value FROM settings WHERE setting_key = 'morning_cutoff'");
+$morning_cutoff = ($morning_res && $morning_res->num_rows > 0) ? $morning_res->fetch_assoc()['setting_value'] : '12:00:00';
+
+$afternoon_res = $conn->query("SELECT setting_value FROM settings WHERE setting_key = 'afternoon_cutoff'");
+$afternoon_cutoff = ($afternoon_res && $afternoon_res->num_rows > 0) ? $afternoon_res->fetch_assoc()['setting_value'] : '13:00:00';
+
+$morning_formatted = date('H:i', strtotime($morning_cutoff));
+$afternoon_formatted = date('H:i', strtotime($afternoon_cutoff));
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Dashboard</title>
     <link rel="stylesheet" href="../assets/css/style.css">
     <link rel="stylesheet" href="../assets/css/dashboard.css">
@@ -203,7 +225,8 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
                 <p>Daily Time Record • Admin Dashboard</p>
             </div>
         </div>
-        <div class="header-actions">
+        <button class="mobile-menu-btn" onclick="toggleMenu()" title="Toggle Menu">☰</button>
+        <div class="header-actions" id="headerActions">
             <div class="admin-profile">
                 <div class="admin-avatar"><?= strtoupper(substr($_SESSION['admin_name'], 0, 1)) ?></div>
                 <span class="admin-greeting">Hi, <?= htmlspecialchars($_SESSION['admin_name']) ?></span>
@@ -223,18 +246,73 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
         }
         ?>
 
+        <!-- Quick Stats Overview -->
+        <div class="quick-stats-grid">
+            <div class="stat-card">
+                <div class="stat-icon">👥</div>
+                <div class="stat-info">
+                    <h4>Total Employees</h4>
+                    <p><?= number_format($total_emp) ?></p>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">📅</div>
+                <div class="stat-info">
+                    <h4>Today's Time-Ins</h4>
+                    <p><?= number_format($total_today_in) ?></p>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">📊</div>
+                <div class="stat-info">
+                    <h4>Records This Month</h4>
+                    <p><?= number_format($total_month_records) ?></p>
+                </div>
+            </div>
+        </div>
+
         <div class="dashboard-grid">
+            <div id="system-settings" class="form-section">
+                <h3 style="display: flex; align-items: center; gap: 10px;">⚙️ System Settings</h3>
+                <form action="update_settings.php" method="POST" class="filter-container" style="margin-bottom: 0;">
+                    <div class="filter-row">
+                        <div class="filter-group">
+                            <label for="morning_cutoff">Morning Cutoff Time:</label>
+                            <input type="time" name="morning_cutoff" id="morning_cutoff" value="<?= htmlspecialchars($morning_formatted) ?>" required>
+                        </div>
+                        <div class="filter-group">
+                            <label for="afternoon_cutoff">Afternoon Cutoff Time:</label>
+                            <input type="time" name="afternoon_cutoff" id="afternoon_cutoff" value="<?= htmlspecialchars($afternoon_formatted) ?>" required>
+                        </div>
+                        <div class="filter-actions" style="min-width: auto; flex: none;">
+                            <button type="submit">Update Settings</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
             <div id="user-management" class="form-section">
                 <h3 style="display: flex; align-items: center; gap: 10px;">👤 Add New User</h3>
-                <form action="add_user.php" method="POST">
+                <form action="add_user.php" method="POST" class="report-form" onsubmit="return verifyWmsuEmail()">
                     <label for="name">Full Name:</label>
                     <input type="text" id="name" name="name" placeholder="e.g. Juan Dela Cruz" required>
                     
                     <label for="idnumber">ID Number:</label>
                     <input type="text" id="idnumber" name="idnumber" required placeholder="XXXX-XXXXX" pattern="[0-9]{4}-[0-9]{4,5}" title="Please use the format XXXX-XXXX or XXXX-XXXXX" oninput="formatIdNumber(this)">
                     
+                    <label for="email">WMSU Email Address:</label>
+                    <div style="display: flex; gap: 15px; margin-bottom: 20px;">
+                        <input type="email" id="email" name="email" required placeholder="e.g. employee@wmsu.edu.ph" pattern="^[a-zA-Z0-9._%+\-]+@wmsu\.edu\.ph$" title="Must be a valid @wmsu.edu.ph email address" style="margin-bottom: 0; flex: 1;">
+                        <button type="button" id="sendCodeBtn" onclick="sendVerificationCode()" style="flex: 0 0 auto; width: auto; margin: 0;">Send Code</button>
+                    </div>
+                    
+                    <div id="verificationSection" style="display: none;">
+                        <label for="verification_code">Verification Code:</label>
+                        <input type="text" id="verification_code" name="verification_code" placeholder="Enter the 6-digit code" maxlength="6" style="letter-spacing: 4px; font-weight: bold; text-align: center; font-size: 1.2rem;">
+                    </div>
+
                     <label for="position">Position / Role:</label>
-                    <select id="position" name="position" style="margin-bottom: 24px;">
+                    <select id="position" name="position">
                         <option value="Employee">Employee</option>
                         <option value="Intern">Intern</option>
                         <option value="Manager">Manager</option>
@@ -246,9 +324,9 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
                 </form>
             </div>
 
-            <div class="form-section">
+            <div class="form-section full-width">
                 <h3 style="display: flex; align-items: center; gap: 10px;">📅 View Employee Activity</h3>
-                <form action="dashboard.php" method="GET">
+                <form action="dashboard.php" method="GET" class="filter-container" style="margin-bottom: 0;">
                     <input type="hidden" name="month" value="<?= htmlspecialchars($month) ?>">
                     <input type="hidden" name="year" value="<?= htmlspecialchars($year) ?>">
                     <?php if (isset($_GET['dl_user'])): ?>
@@ -263,15 +341,19 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
                     <?php if (isset($_GET['dl_date'])): ?>
                         <input type="hidden" name="dl_date" value="<?= htmlspecialchars($_GET['dl_date']) ?>">
                     <?php endif; ?>
-                    <label for="user_select">Select Employee:</label>
-                    <select name="idnumber" id="user_select" onchange="this.form.submit()">
-                        <option value="">-- Select an Employee --</option>
-                        <?php foreach($all_users as $user): ?>
-                            <option value="<?= htmlspecialchars($user['idnumber']) ?>" <?= (isset($_GET['idnumber']) && $_GET['idnumber'] == $user['idnumber']) ? 'selected' : '' ?>>
-                                <?= htmlspecialchars($user['name']) ?> (<?= htmlspecialchars($user['idnumber']) ?>)
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
+                    <div class="filter-row">
+                        <div class="filter-group">
+                            <label for="user_select">Select Employee:</label>
+                            <select name="idnumber" id="user_select" onchange="this.form.submit()">
+                                <option value="">-- Select an Employee --</option>
+                                <?php foreach($all_users as $user): ?>
+                                    <option value="<?= htmlspecialchars($user['idnumber']) ?>" <?= (isset($_GET['idnumber']) && $_GET['idnumber'] == $user['idnumber']) ? 'selected' : '' ?>>
+                                        <?= htmlspecialchars($user['name']) ?> (<?= htmlspecialchars($user['idnumber']) ?>)
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                    </div>
                 </form>
 
                 <?php if (isset($_GET['idnumber']) && !empty($_GET['idnumber']) && !empty($selected_user_name)): ?>
@@ -283,7 +365,8 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
                             <h4 style="margin: 0 0 6px 0; font-size: 1.2rem; color: var(--text-main);"><?= htmlspecialchars($selected_user_name) ?></h4>
                             <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
                                 <span style="background: #fff; padding: 4px 12px; border-radius: 50px; font-size: 0.8rem; color: var(--text-muted); font-weight: 600; border: 1px solid #e2e8f0; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">ID: <?= htmlspecialchars($_GET['idnumber']) ?></span>
-                                <span style="background: #ebf8ff; padding: 4px 12px; border-radius: 50px; font-size: 0.8rem; color: #2b6cb0; font-weight: 600; border: 1px solid #bee3f8; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">Role: <?= htmlspecialchars($selected_user_position) ?></span>
+                                <span style="background: #fff5f5; padding: 4px 12px; border-radius: 50px; font-size: 0.8rem; color: #990000; font-weight: 600; border: 1px solid #fecaca; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">Role: <?= htmlspecialchars($selected_user_position) ?></span>
+                                <button onclick="openEmailModal()" class="btn-secondary" style="padding: 4px 12px; font-size: 0.75rem; border-radius: 50px; box-shadow: none; margin: 0; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #cbd5e1; background: #ebf8ff; color: #2b6cb0;">📧 Email</button>
                                 <button onclick="openEditModal()" class="btn-secondary" style="padding: 4px 12px; font-size: 0.75rem; border-radius: 50px; box-shadow: none; margin: 0; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #cbd5e1;">✏️ Edit Profile</button>
                                 <form action="delete_user.php" method="POST" style="display: inline; width: auto;" onsubmit="return confirm('Are you sure you want to delete this employee and all their records? This action cannot be undone.');">
                                     <input type="hidden" name="idnumber" value="<?= htmlspecialchars($_GET['idnumber']) ?>">
@@ -294,11 +377,11 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
                         <div style="display: flex; gap: 12px;">
                             <div style="background: #fff; padding: 12px 18px; border-radius: 10px; text-align: center; border: 1px solid var(--border-color); box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
                                 <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700; margin-bottom: 4px; letter-spacing: 0.5px;">This Week</div>
-                                <div style="font-size: 1.1rem; font-weight: 700; color: #166534; display: flex; align-items: baseline; justify-content: center; gap: 4px;"><?= $emp_stats['weekly_timeins'] ?: 0 ?> <span style="font-size: 0.75rem; color: #64748b; font-weight: 500;">Time Ins</span></div>
+                                <div style="font-size: 1.1rem; font-weight: 700; color: #990000; display: flex; align-items: baseline; justify-content: center; gap: 4px;"><?= $emp_stats['weekly_timeins'] ?: 0 ?> <span style="font-size: 0.75rem; color: #64748b; font-weight: 500;">Time Ins</span></div>
                             </div>
                             <div style="background: #fff; padding: 12px 18px; border-radius: 10px; text-align: center; border: 1px solid var(--border-color); box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
                                 <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700; margin-bottom: 4px; letter-spacing: 0.5px;">This Month</div>
-                                <div style="font-size: 1.1rem; font-weight: 700; color: #166534; display: flex; align-items: baseline; justify-content: center; gap: 4px;"><?= $emp_stats['monthly_timeins'] ?: 0 ?> <span style="font-size: 0.75rem; color: #64748b; font-weight: 500;">Time Ins</span></div>
+                                <div style="font-size: 1.1rem; font-weight: 700; color: #990000; display: flex; align-items: baseline; justify-content: center; gap: 4px;"><?= $emp_stats['monthly_timeins'] ?: 0 ?> <span style="font-size: 0.75rem; color: #64748b; font-weight: 500;">Time Ins</span></div>
                             </div>
                         </div>
                     </div>
@@ -312,6 +395,7 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
                                     <th>Record Type</th>
                                     <th>Timestamp</th>
                                     <th>Photo</th>
+                                    <th>Action</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -330,6 +414,12 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
                                                 <span style="color: var(--text-muted); font-size: 0.85rem;">-</span>
                                             <?php endif; ?>
                                         </td>
+                                        <td>
+                                            <form action="delete_record.php" method="POST" onsubmit="return confirm('Are you sure you want to delete this specific record?');" style="margin:0;">
+                                                <input type="hidden" name="record_id" value="<?= $record['id'] ?>">
+                                                <button type="submit" style="padding: 4px 8px; font-size: 0.75rem; border-radius: 4px; background: #fff5f5; color: #c53030; border: 1px solid #fecaca; box-shadow: none; width: auto;">Delete</button>
+                                            </form>
+                                        </td>
                                     </tr>
                                 <?php endforeach; ?>
                             </tbody>
@@ -345,57 +435,59 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
 
             <div class="form-section full-width">
                 <h3 style="display: flex; align-items: center; gap: 10px;">📥 Download Reports & Preview</h3>
-                <form action="dashboard.php" method="GET" class="report-form" style="display: flex; flex-direction: row; gap: 15px; flex-wrap: wrap; align-items: flex-end; background: #f8fafc; padding: 20px; border-radius: 8px; border: 1px solid var(--border-color);">
+                <form action="dashboard.php" method="GET" class="filter-container">
                     <input type="hidden" name="month" value="<?= htmlspecialchars($month) ?>">
                     <input type="hidden" name="year" value="<?= htmlspecialchars($year) ?>">
                     <?php if (isset($_GET['idnumber'])): ?>
                         <input type="hidden" name="idnumber" value="<?= htmlspecialchars($_GET['idnumber']) ?>">
                     <?php endif; ?>
 
-                    <div style="flex: 2; min-width: 250px;">
-                        <label for="dl_search" style="display:block; margin-bottom: 5px;">Search by Name/ID:</label>
-                        <div style="display:flex; gap: 5px;">
-                            <input type="search" name="dl_search" id="dl_search" placeholder="Enter name or ID..." value="<?= htmlspecialchars($dl_search) ?>" style="margin-bottom: 0; width: 100%;" onchange="this.form.submit()">
+                    <div class="filter-row">
+                        <div class="filter-group large">
+                            <label for="dl_search">Search by Name/ID:</label>
+                            <input type="search" name="dl_search" id="dl_search" placeholder="Enter name or ID..." value="<?= htmlspecialchars($dl_search) ?>" onchange="this.form.submit()">
+                        </div>
+
+                        <div class="filter-group">
+                            <label for="dl_user">Employee:</label>
+                            <select name="dl_user" id="dl_user" onchange="this.form.submit()">
+                                <option value="all">All Employees</option>
+                                <?php foreach($all_users as $user): ?>
+                                    <option value="<?= htmlspecialchars($user['idnumber']) ?>" <?= ($dl_user == $user['idnumber']) ? 'selected' : '' ?>>
+                                        <?= htmlspecialchars($user['name']) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
                         </div>
                     </div>
-
-                    <div style="flex: 1; min-width: 180px;">
-                        <label for="dl_user" style="display:block; margin-bottom: 5px;">Employee:</label>
-                        <select name="dl_user" id="dl_user" onchange="this.form.submit()" style="margin-bottom: 0;">
-                            <option value="all">All Employees</option>
-                            <?php foreach($all_users as $user): ?>
-                                <option value="<?= htmlspecialchars($user['idnumber']) ?>" <?= ($dl_user == $user['idnumber']) ? 'selected' : '' ?>>
-                                    <?= htmlspecialchars($user['name']) ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
                     
-                    <div style="flex: 1; min-width: 150px;">
-                        <label for="dl_date" style="display:block; margin-bottom: 5px;">Specific Date:</label>
-                        <input type="date" name="dl_date" id="dl_date" value="<?= htmlspecialchars($dl_date) ?>" onchange="this.form.submit()" style="margin-bottom: 0; padding: 6px 10px;">
-                    </div>
+                    <div class="filter-row" style="margin-top: 15px;">
+                        <div class="filter-group">
+                            <label for="dl_date">Specific Date:</label>
+                            <input type="date" name="dl_date" id="dl_date" value="<?= htmlspecialchars($dl_date) ?>" onchange="this.form.submit()">
+                        </div>
 
-                    <div style="flex: 1; min-width: 150px;">
-                        <label for="dl_time" style="display:block; margin-bottom: 5px;">Or Timeframe:</label>
-                        <select name="dl_time" id="dl_time" onchange="this.form.submit()" style="margin-bottom: 0;" <?= !empty($dl_date) ? 'disabled title="Clear Specific Date to use timeframe"' : '' ?>>
-                            <option value="all" <?= ($dl_time == 'all') ? 'selected' : '' ?>>All Time</option>
-                            <option value="weekly" <?= ($dl_time == 'weekly') ? 'selected' : '' ?>>This Week</option>
-                            <option value="monthly" <?= ($dl_time == 'monthly') ? 'selected' : '' ?>>This Month</option>
-                            <option value="yearly" <?= ($dl_time == 'yearly') ? 'selected' : '' ?>>This Year</option>
-                        </select>
-                    </div>
-                    
-                    <div style="flex: 1; min-width: 250px; display: flex; gap: 10px;">
-                        <a href="download.php?dl_user=<?= urlencode($dl_user) ?>&dl_time=<?= urlencode($dl_time) ?>&dl_search=<?= urlencode($dl_search) ?>&dl_date=<?= urlencode($dl_date) ?>" class="btn" style="flex: 1; text-align: center; margin-bottom: 0; display: flex; align-items: center; justify-content: center;">Download CSV</a>
-                        <a href="dashboard.php" class="btn btn-secondary" style="flex: 1; text-align: center; margin-bottom: 0; display: flex; align-items: center; justify-content: center;" title="Clear all filters">Clear</a>
+                        <div class="filter-group">
+                            <label for="dl_time">Or Timeframe:</label>
+                            <select name="dl_time" id="dl_time" onchange="this.form.submit()" <?= !empty($dl_date) ? 'disabled title="Clear Specific Date to use timeframe"' : '' ?>>
+                                <option value="all" <?= ($dl_time == 'all') ? 'selected' : '' ?>>All Time</option>
+                                <option value="weekly" <?= ($dl_time == 'weekly') ? 'selected' : '' ?>>This Week</option>
+                                <option value="monthly" <?= ($dl_time == 'monthly') ? 'selected' : '' ?>>This Month</option>
+                                <option value="yearly" <?= ($dl_time == 'yearly') ? 'selected' : '' ?>>This Year</option>
+                            </select>
+                        </div>
+                        
+                        <div class="filter-actions">
+                            <a href="download.php?dl_user=<?= urlencode($dl_user) ?>&dl_time=<?= urlencode($dl_time) ?>&dl_search=<?= urlencode($dl_search) ?>&dl_date=<?= urlencode($dl_date) ?>" class="btn">📥 Download CSV</a>
+                            <a href="dashboard.php" class="btn btn-secondary" title="Clear all filters">❌ Clear</a>
+                        </div>
                     </div>
                 </form>
 
                 <div class="table-responsive" style="max-height: 250px; overflow-y: auto; margin-top: 20px;">
                     <table class="user-records-table">
                         <thead style="position: sticky; top: 0; z-index: 1;">
-                            <tr><th>ID Number</th><th>Name</th><th>Record Type</th><th>Timestamp</th><th>Photo</th></tr>
+                            <tr><th>ID Number</th><th>Name</th><th>Record Type</th><th>Timestamp</th><th>Photo</th><th>Action</th></tr>
                         </thead>
                         <tbody>
                             <?php if (empty($preview_records)): ?>
@@ -412,6 +504,12 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
                                         <?php else: ?>
                                             <span style="color: var(--text-muted); font-size: 0.85rem;">-</span>
                                         <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <form action="delete_record.php" method="POST" onsubmit="return confirm('Are you sure you want to delete this specific record?');" style="margin:0;">
+                                            <input type="hidden" name="record_id" value="<?= $rec['id'] ?>">
+                                            <button type="submit" style="padding: 4px 8px; font-size: 0.75rem; border-radius: 4px; background: #fff5f5; color: #c53030; border: 1px solid #fecaca; box-shadow: none; width: auto;">Delete</button>
+                                        </form>
                                     </td>
                                 </tr>
                             <?php endforeach; endif; ?>
@@ -524,11 +622,17 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
     <div id="editUserModal" class="modal">
         <div class="modal-content" style="text-align: left;">
             <h3 style="margin-top: 0; margin-bottom: 20px; border-bottom: none; padding-bottom: 0; color: var(--text-main);">✏️ Edit Employee Profile</h3>
-            <form action="edit_user.php" method="POST">
-                <input type="hidden" name="idnumber" value="<?= htmlspecialchars($_GET['idnumber']) ?>">
+            <form action="edit_user.php" method="POST" class="report-form">
+                <input type="hidden" name="old_idnumber" value="<?= htmlspecialchars($_GET['idnumber']) ?>">
+                
+                <label for="edit_idnumber">ID Number:</label>
+                <input type="text" id="edit_idnumber" name="idnumber" value="<?= htmlspecialchars($_GET['idnumber']) ?>" required pattern="[0-9]{4}-[0-9]{4,5}" title="Please use the format XXXX-XXXX or XXXX-XXXXX" oninput="formatIdNumber(this)">
                 
                 <label for="edit_name">Full Name:</label>
                 <input type="text" id="edit_name" name="name" value="<?= htmlspecialchars($selected_user_name) ?>" required>
+                
+                <label for="edit_email">WMSU Email Address:</label>
+                <input type="email" id="edit_email" name="email" value="<?= htmlspecialchars($selected_user_email ?? '') ?>" required placeholder="e.g. employee@wmsu.edu.ph" pattern="^[a-zA-Z0-9._%+\-]+@wmsu\.edu\.ph$" title="Must be a valid @wmsu.edu.ph email address">
                 
                 <label for="edit_position">Position / Role:</label>
                 <select id="edit_position" name="position" style="margin-bottom: 24px;">
@@ -547,6 +651,29 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
         </div>
     </div>
     <?php endif; ?>
+
+    <!-- Email User Modal -->
+    <?php if (isset($_GET['idnumber']) && !empty($_GET['idnumber']) && !empty($selected_user_name)): ?>
+    <div id="emailUserModal" class="modal">
+        <div class="modal-content" style="text-align: left;">
+            <h3 style="margin-top: 0; margin-bottom: 20px; border-bottom: none; padding-bottom: 0; color: var(--text-main);">📧 Email <?= htmlspecialchars($selected_user_name) ?></h3>
+            <form action="send_user_email.php" method="POST" class="report-form">
+                <input type="hidden" name="idnumber" value="<?= htmlspecialchars($_GET['idnumber']) ?>">
+                
+                <label for="email_subject">Subject:</label>
+                <input type="text" id="email_subject" name="subject" placeholder="Enter email subject" required>
+                
+                <label for="email_message">Message:</label>
+                <textarea id="email_message" name="message" rows="5" placeholder="Type your message here..." required style="resize: vertical;"></textarea>
+                
+                <div class="button-group">
+                    <button type="submit">Send Email</button>
+                    <button type="button" class="btn-secondary" onclick="closeEmailModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <?php endif; ?>
     
     <!-- Day Records Modal -->
     <div id="dayRecordsModal" class="modal">
@@ -558,7 +685,7 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
             <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
                 <table class="user-records-table">
                     <thead style="position: sticky; top: 0; z-index: 1;">
-                        <tr><th style="text-align: center; width: 60px;">Photo</th><th>Name</th><th>ID</th><th>Type</th><th>Time</th></tr>
+                        <tr><th style="text-align: center; width: 60px;">Photo</th><th>Name</th><th>ID</th><th>Type</th><th>Time</th><th>Action</th></tr>
                     </thead>
                     <tbody id="dayRecordsBody">
                         <tr><td colspan="5" style="text-align: center; padding: 20px; color: var(--text-muted);">Loading...</td></tr>
@@ -569,6 +696,11 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
     </div>
 
     <script>
+        function toggleMenu() {
+            const menu = document.getElementById('headerActions');
+            menu.classList.toggle('show');
+        }
+
         function openDayModal(dateStr) {
             document.getElementById('dayRecordsModal').style.display = 'flex';
             
@@ -604,6 +736,12 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
                             <td style="vertical-align: middle;">${rec.idnumber}</td>
                             <td style="vertical-align: middle;"><span class="badge ${typeClass}">${typeText}</span></td>
                             <td style="font-size: 0.9rem; color: var(--text-muted); vertical-align: middle;">${timeStr}</td>
+                            <td style="vertical-align: middle;">
+                                <form action="delete_record.php" method="POST" onsubmit="return confirm('Are you sure you want to delete this specific record?');" style="margin:0;">
+                                    <input type="hidden" name="record_id" value="${rec.id}">
+                                    <button type="submit" style="padding: 4px 8px; font-size: 0.75rem; border-radius: 4px; background: #fff5f5; color: #c53030; border: 1px solid #fecaca; box-shadow: none; width: auto;">Delete</button>
+                                </form>
+                            </td>
                         </tr>`;
                     });
                     tbody.innerHTML = html;
@@ -623,6 +761,60 @@ $recent_photos = $recent_photos_result ? $recent_photos_result->fetch_all(MYSQLI
         }
         function closeEditModal() {
             document.getElementById('editUserModal').style.display = 'none';
+        }
+
+        function openEmailModal() {
+            document.getElementById('emailUserModal').style.display = 'flex';
+        }
+        function closeEmailModal() {
+            document.getElementById('emailUserModal').style.display = 'none';
+        }
+
+        function verifyWmsuEmail() {
+            const emailInput = document.getElementById('email').value;
+            if (!emailInput.endsWith('@wmsu.edu.ph')) {
+                alert('Verification Failed: Only official @wmsu.edu.ph email addresses are allowed.');
+                return false;
+            }
+            return true;
+        }
+
+        function sendVerificationCode() {
+            const emailInput = document.getElementById('email');
+            const email = emailInput.value;
+            if (!email.endsWith('@wmsu.edu.ph')) {
+                alert('Please enter a valid @wmsu.edu.ph email address first.');
+                return;
+            }
+
+            const btn = document.getElementById('sendCodeBtn');
+            btn.innerText = 'Sending...';
+            btn.disabled = true;
+
+            fetch('send_code.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'email=' + encodeURIComponent(email)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert(data.message || 'Verification code sent to ' + email);
+                    document.getElementById('verificationSection').style.display = 'block';
+                    document.getElementById('verification_code').required = true;
+                    btn.innerText = 'Code Sent';
+                } else {
+                    alert('Error: ' + data.message);
+                    btn.innerText = 'Send Code';
+                    btn.disabled = false;
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Failed to send verification code. Please check your network connection.');
+                btn.innerText = 'Send Code';
+                btn.disabled = false;
+            });
         }
 
         function formatIdNumber(input) {

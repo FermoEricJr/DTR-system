@@ -23,6 +23,15 @@ CREATE TABLE IF NOT EXISTS records (
     FOREIGN KEY (idnumber) REFERENCES user(idnumber) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS settings (
+    setting_key VARCHAR(50) PRIMARY KEY,
+    setting_value VARCHAR(255) NOT NULL
+);
+
+-- Insert default cutoff times
+INSERT IGNORE INTO settings (setting_key, setting_value) VALUES ('morning_cutoff', '12:00:00');
+INSERT IGNORE INTO settings (setting_key, setting_value) VALUES ('afternoon_cutoff', '13:00:00');
+
 -- Insert a dummy user so you can test the time in/out immediately
 INSERT INTO user (idnumber, name) VALUES ('2024-03574', 'Eric Fermo');
 

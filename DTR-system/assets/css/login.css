@@ -1,37 +1,108 @@
         body {
-            background: url('https://images.unsplash.com/photo-1541339907198-e08756dedf3f?ixlib=rb-1.2.1&auto=format&fit=crop&w=1950&q=80') center/cover no-repeat;
-            background-attachment: fixed;
+            background: linear-gradient(rgba(153, 0, 0, 0.190), rgba(153, 0, 0, 0.6)), url('../img/background.jpg') center/cover no-repeat fixed;
             display: flex;
             justify-content: center;
             align-items: center;
-            height: 100vh;
+            min-height: 100vh;
             margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
         }
         .login-overlay {
-            position: absolute;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(153, 0, 0, 0.85); /* WMSU Crimson Overlay */
-            z-index: 1;
+            display: none;
         }
         .login-card {
-            background: #fff;
+            background: rgba(255, 255, 255, 0.95);
+            -webkit-backdrop-filter: blur(10px);
+            backdrop-filter: blur(10px);
             padding: 40px;
             border-radius: 12px;
-            box-shadow: 0 15px 35px rgba(0,0,0,0.2);
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.5);
             width: 100%;
             max-width: 420px;
+            box-sizing: border-box;
             z-index: 2;
             position: relative;
             text-align: center;
         }
         .login-card h2 {
-            color: var(--primary);
+            color: #990000;
             margin-bottom: 5px;
             font-size: 28px;
         }
         .login-card p.subtitle {
-            color: var(--text-muted);
+            color: #6c757d;
             margin-bottom: 25px;
             margin-top: 0;
         }
-        .login-card form { text-align: left; }
+        .login-card form { text-align: left; margin-top: 10px; }
+        
+        .login-card label {
+            display: block;
+            font-weight: 600;
+            color: #495057;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        .login-card input[type="text"],
+        .login-card input[type="password"] {
+            width: 100%;
+            padding: 14px;
+            margin-bottom: 20px;
+            border: 2px solid #e1e5eb;
+            border-radius: 8px;
+            font-size: 16px;
+            box-sizing: border-box;
+            transition: all 0.3s ease;
+            background: #fcfcfc;
+        }
+        .login-card input[type="text"]:focus,
+        .login-card input[type="password"]:focus {
+            border-color: #990000;
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(153, 0, 0, 0.15);
+            background: #ffffff;
+        }
+        .login-card button {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #990000 0%, #7a0000 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 10px rgba(153, 0, 0, 0.2);
+            margin-top: 10px;
+        }
+        .login-card button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(153, 0, 0, 0.3);
+        }
+        .login-card button:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 5px rgba(153, 0, 0, 0.2);
+        }
+
+        /* Mobile Responsiveness */
+        @media (max-width: 480px) {
+            .login-card {
+                padding: 30px 20px;
+            }
+            .login-card h2 {
+                font-size: 24px;
+            }
+            .login-card p.subtitle {
+                font-size: 13px;
+                margin-bottom: 20px;
+            }
+            .login-card input[type="text"],
+            .login-card input[type="password"],
+            .login-card button {
+                padding: 12px;
+                font-size: 15px;
+            }
+        }

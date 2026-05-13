@@ -26,10 +26,6 @@
             <h1>Western Mindanao State University</h1>
             <p>Daily Time Record System</p>
         </div>
-        <!-- Admin Cogwheel Icon -->
-        <a href="login.php" class="admin-cog" title="Admin Login">
-            &#9881;
-        </a>
     </header>
 
     <div class="main-wrapper">
@@ -66,8 +62,11 @@
                         <button type="button" class="btn-timeout" onclick="submitAction('timeout')">Time Out</button>
                     </div>
                     
-                    <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #f0f2f5;">
-                        <button type="button" onclick="openRecentActivityModal()" style="width: 100%; font-size: 0.95rem; padding: 12px; background: #f8fafc; color: #475569; border: 1px solid #e2e8f0; box-shadow: none; border-radius: 8px;">📋 View Recent Activity</button>
+                    <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #f0f2f5; display: flex; align-items: center; gap: 10px;">
+                        <button type="button" onclick="openRecentActivityModal()" style="flex: 1; font-size: 0.95rem; padding: 12px; background: #f8fafc; color: #475569; border: 1px solid #e2e8f0; box-shadow: none; border-radius: 8px; margin: 0;">📋 View Recent Activity</button>
+                        <a href="login.php" class="admin-cog-inline" title="Admin Login" style="font-size: 20px; text-decoration: none; color: #718096; transition: transform 0.3s ease, color 0.3s ease; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;">
+                            &#9881;
+                        </a>
                     </div>
                 </form>
             </div>

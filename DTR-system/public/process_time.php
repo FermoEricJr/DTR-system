@@ -16,15 +16,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $user = $result->fetch_assoc();
         
         // --- NEW FEATURE: SESSION LIMIT LOGIC ---
-        $current_hour = (int)date('H'); // 24-hour format
+        // Fetch dynamic cutoff settings
+        $morning_res = $conn->query("SELECT setting_value FROM settings WHERE setting_key = 'morning_cutoff'");
+        $morning_cutoff = ($morning_res && $morning_res->num_rows > 0) ? $morning_res->fetch_assoc()['setting_value'] : '12:00:00';
+
+        $afternoon_res = $conn->query("SELECT setting_value FROM settings WHERE setting_key = 'afternoon_cutoff'");
+        $afternoon_cutoff = ($afternoon_res && $afternoon_res->num_rows > 0) ? $afternoon_res->fetch_assoc()['setting_value'] : '13:00:00';
+        
+        $current_time = date('H:i:s');
         $today = date('Y-m-d');
         
-        // Define session boundaries (Adjust hours as needed)
-        // AM: 00:00 - 11:59 | PM: 12:00 - 23:59
-        $is_am = ($current_hour < 12);
-        $start_time = $is_am ? "$today 00:00:00" : "$today 12:00:00";
-        $end_time = $is_am ? "$today 11:59:59" : "$today 23:59:59";
-        $session_name = $is_am ? "Morning" : "Afternoon";
+        // Define session boundaries
+        if ($current_time <= $morning_cutoff) {
+            $start_time = "$today 00:00:00";
+            $end_time = "$today $morning_cutoff";
+            $session_name = "Morning";
+        } elseif ($current_time >= $afternoon_cutoff) {
+            $start_time = "$today $afternoon_cutoff";
+            $end_time = "$today 23:59:59";
+            $session_name = "Afternoon";
+        } else {
+            // Between morning cutoff and afternoon cutoff (Lunch Break)
+            if ($action === 'timeout') {
+                $start_time = "$today 00:00:00";
+                $end_time = "$today $afternoon_cutoff";
+                $session_name = "Morning";
+            } else {
+                $start_time = "$today $morning_cutoff";
+                $end_time = "$today 23:59:59";
+                $session_name = "Afternoon";
+            }
+        }
 
         // Check if this action already exists for this user in this session
         $session_check = $conn->prepare("SELECT id FROM records WHERE idnumber = ? AND record_type = ? AND timestamp BETWEEN ? AND ?");
